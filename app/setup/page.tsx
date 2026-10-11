@@ -1,5 +1,6 @@
 "use client";
 
+// Owner setup (Figma section 1 + Screen 1): choose the 2-of-2 Safe to protect and name your guardian.
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { isAddress } from "viem";
@@ -20,16 +21,25 @@ export default function Setup() {
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
 
-  // Prefill from a previous setup in this browser
+  // Prefill from a previous setup in this browser, or the one the server already has
   useEffect(() => {
-    const p = loadProfile();
-    if (!p) return;
-    const t = setTimeout(() => {
+    let cancelled = false;
+    const fill = (p: { safeAddress: string; ownerName: string; guardianName: string }) => {
+      if (cancelled) return;
       setSafeInput(p.safeAddress);
       setOwnerName(p.ownerName);
       setGuardianName(p.guardianName);
-    }, 0);
-    return () => clearTimeout(t);
+    };
+    const p = loadProfile();
+    if (p) setTimeout(() => fill(p), 0);
+    else
+      fetch("/api/sl/setup")
+        .then((r) => r.json())
+        .then((a) => a && fill(a))
+        .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   async function connect() {
@@ -68,17 +78,33 @@ export default function Setup() {
     }
   }
 
-  function save() {
+  async function save() {
     if (!checked) return;
     if (!ownerName.trim() || !guardianName.trim()) return setError("Please enter both names");
-    saveProfile({
-      safeAddress: checked.safeAddress,
-      ownerAddress: checked.owner,
-      ownerName: ownerName.trim(),
-      guardianAddress: checked.guardian,
-      guardianName: guardianName.trim(),
-    });
-    router.push("/");
+    setError("");
+    setBusy("Saving...");
+    try {
+      // The server keeps the account too, so the guardian's laptop sees the same Safe and names
+      const res = await fetch("/api/sl/setup", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ safeAddress: checked.safeAddress, owner: checked.owner, ownerName: ownerName.trim(), guardianName: guardianName.trim() }),
+      });
+      const out = await res.json();
+      if (!res.ok) throw new Error(out.error);
+      saveProfile({
+        safeAddress: out.safeAddress,
+        ownerAddress: out.ownerAddress,
+        ownerName: out.ownerName,
+        guardianAddress: out.guardianAddress,
+        guardianName: out.guardianName,
+      });
+      router.push("/");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy("");
+    }
   }
 
   return (
@@ -133,7 +159,7 @@ export default function Setup() {
             <input type="checkbox" checked={understood} onChange={(e) => setUnderstood(e.target.checked)} style={{ width: "auto", marginRight: 8 }} />
             I understand how this works
           </label>
-          <button onClick={save} disabled={!understood}>Save and continue</button>
+          <button onClick={save} disabled={!understood || !!busy}>Save and continue</button>
         </section>
       )}
 

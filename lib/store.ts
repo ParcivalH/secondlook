@@ -18,6 +18,9 @@ export type TransferRecord = {
   createdAt: number;
   expiresAt: number;
   cancelled?: boolean;
+  rejected?: boolean;
+  rejection?: { message: string; signature: string }; // guardian's Ledger-signed rejection
+  executionTxHash?: string;
 };
 
 const FILE = path.join(process.cwd(), ".data", "transfers.json");

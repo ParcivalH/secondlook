@@ -1,3 +1,4 @@
+// Shared settings (Ethereum Sepolia testnet). Everything user-specific lives in the profile, not here.
 export const CHAIN_ID = 11155111;
 
 // Pending transfers expire after 24h: doing nothing never sends money

@@ -1,3 +1,4 @@
+// Browser-only helpers: connect MetaMask and open a Safe with MetaMask as signer.
 import { getAddress, type EIP1193Provider } from "viem";
 
 declare global {

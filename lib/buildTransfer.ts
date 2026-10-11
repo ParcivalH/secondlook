@@ -1,6 +1,9 @@
 import { encodeFunctionData, erc20Abi, getAddress, parseUnits } from "viem";
 import type { Token } from "./tokens";
 
+// "send <amount> <token> to <recipient>" -> the {to, value, data} of a Safe transaction.
+//  - ETH:    to = recipient,      value = amount in wei, data = "0x"
+//  - ERC-20: to = token contract, value = 0,             data = transfer(recipient, amount)
 export function buildTransfer(token: Token, recipient: string, amount: string) {
   const to = getAddress(recipient);
   const units = parseUnits(amount, token.decimals);

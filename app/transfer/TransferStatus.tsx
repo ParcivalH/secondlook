@@ -10,7 +10,7 @@ import type { TransferRecord } from "@/lib/store";
 
 type Status = {
   record: TransferRecord;
-  status: "waiting" | "ready" | "executed" | "cancelled" | "expired";
+  status: "waiting" | "ready" | "executed" | "cancelled" | "expired" | "blocked";
   confirmations: number;
   threshold: number;
   executionTxHash: string | null;
@@ -72,14 +72,6 @@ export function TransferStatus() {
         <p className="mono">to {r.recipient}</p>
         <p>Risk check: <span className={`badge ${r.risk?.level}`}>{r.risk?.level}</span></p>
         <p className="muted">Confirmations: {s.confirmations} / {s.threshold}</p>
-                <p className="muted">Transfer ID (safeTxHash):</p>
-        <p className="mono">{safeTxHash}</p>
-        {s.status === "waiting" && (
-          <p className="muted">
-            Guardian command:<br />
-            <span className="mono">node --env-file=.env.local scripts/4-guardian-approve-and-execute.cjs {safeTxHash}</span>
-          </p>
-        )}
       </section>
 
       <section className="card">
@@ -105,13 +97,23 @@ export function TransferStatus() {
           </>
         )}
         {s.status === "cancelled" && <h3>You stopped it yourself.</h3>}
+        {s.status === "blocked" && (
+          <>
+            <h3>This transfer didn&apos;t go through. Your {r.amount} {r.token} is safe.</h3>
+            <p>{g} declined it on their Ledger. We know this might be frustrating. You didn&apos;t do anything wrong; these situations are designed by professionals to feel real.</p>
+            <p className="muted">
+              Never pay a tax, fee or deposit to withdraw. Beware anyone offering to recover lost money, a common second scam.
+              Report at <a href="https://www.ic3.gov" target="_blank" rel="noreferrer">ic3.gov</a>.
+            </p>
+          </>
+        )}
         {s.status === "expired" && (
           <>
             <h3>{g} didn&apos;t respond in time, so the transfer was cancelled.</h3>
             <p>Your funds never left. You can start it again anytime.</p>
           </>
         )}
-        <p className="muted"><a href={safeQueueUrl(r.safeAddress)} target="_blank" rel="noreferrer">Open in Safe</a> · <Link href="/">New transfer</Link></p>
+        <p className="muted"><a href={safeQueueUrl(r.safeAddress)} target="_blank" rel="noreferrer">Open in Safe</a> · <Link href="/classic">New transfer</Link></p>
       </section>
 
       {busy && <p className="muted">{busy}</p>}

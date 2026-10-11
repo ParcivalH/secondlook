@@ -1,3 +1,4 @@
+// Agent risk check (server). Rules-based for now; later the AI agent is called from here.
 import { isAddress } from "viem";
 import { assessRisk } from "@/lib/risk";
 import { findToken } from "@/lib/tokens";

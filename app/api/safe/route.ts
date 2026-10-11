@@ -1,3 +1,5 @@
+// GET /api/safe?owner=0x...            -> the Safes this wallet owns on Sepolia
+// GET /api/safe?owner=0x...&safe=0x... -> check that Safe is a 2-of-2 the wallet co-owns; returns the guardian
 import { getAddress, isAddress } from "viem";
 import { apiKit, checkGuardedSafe } from "@/lib/safeCheck";
 

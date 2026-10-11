@@ -1,4 +1,4 @@
-
+// Server-only: check that a Safe can be protected by SecondLook (2-of-2, and `owner` is one of the two).
 import SafeApiKit from "@safe-global/api-kit";
 import { getAddress, isAddress } from "viem";
 import { CHAIN_ID } from "./config";

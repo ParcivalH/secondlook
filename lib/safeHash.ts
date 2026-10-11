@@ -1,3 +1,5 @@
+// EIP-712 hashing of a Safe transaction (Safe >= 1.3.0).
+// Same logic as scripts/2-propose.cjs and scripts/3-guardian-confirm.cjs, as a reusable function.
 import { concat, hashDomain, hashStruct, keccak256, type Hex } from "viem";
 import { CHAIN_ID } from "./config";
 

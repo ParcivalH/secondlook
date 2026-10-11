@@ -9,23 +9,29 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.133.0",
+    "@ledgerhq/device-management-kit": "^1.11.0",
+    "@ledgerhq/device-signer-kit-ethereum": "^1.18.1",
+    "@ledgerhq/device-transport-kit-speculos": "^1.2.1",
+    "@ledgerhq/device-transport-kit-web-hid": "^1.2.4",
     "@ledgerhq/hw-app-eth": "^7.10.0",
     "@ledgerhq/hw-transport-node-speculos-http": "^6.36.7",
     "@safe-global/api-kit": "^5.0.3",
     "@safe-global/protocol-kit": "^8.0.7",
+    "@safe-global/safe-modules-deployments": "^3.0.10",
     "next": "16.4.0",
     "react": "19.3.0",
     "react-dom": "19.3.0",
-    "viem": "^2.57.4"
+    "rxjs": "^7.8.2",
+    "viem": "^2.57.4",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
-    "@tailwindcss/turbopack": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.4.0",
-    "tailwindcss": "^4",
     "typescript": "^5"
   }
 }

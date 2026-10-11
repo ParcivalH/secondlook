@@ -1,3 +1,5 @@
+// POST: verify the owner's signed transfer, propose it to Safe, and save its context.
+// GET ?safeTxHash=: current status (owner's waiting page, and later the guardian page).
 import { getAddress, isAddress } from "viem";
 import { EXPIRY_MS } from "@/lib/config";
 import { findToken } from "@/lib/tokens";
@@ -78,7 +80,9 @@ export async function GET(req: Request) {
     const confirmedBy = (tx.confirmations ?? []).map((c) => c.owner);
     const status = tx.isExecuted
       ? "executed"
-      : record.cancelled
+      : record.rejected
+        ? "blocked"
+        : record.cancelled
         ? "cancelled"
         : Date.now() > record.expiresAt
           ? "expired"
@@ -91,7 +95,7 @@ export async function GET(req: Request) {
       confirmations: confirmedBy.length,
       threshold: tx.confirmationsRequired,
       confirmedBy,
-      executionTxHash: tx.transactionHash,
+      executionTxHash: tx.transactionHash ?? record.executionTxHash ?? null,
       hoursLeft: Math.max(0, Math.ceil((record.expiresAt - Date.now()) / 3_600_000)),
       tx, // raw Safe tx, needed by the browser to execute
     });
