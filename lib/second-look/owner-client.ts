@@ -4,6 +4,7 @@ import { createWalletClient, custom, encodeFunctionData, getAddress, parseUnits,
 import { sepolia } from "viem/chains";
 import { buildTransfer } from "@/lib/buildTransfer";
 import { connectOwnerWallet, openSafe } from "@/lib/wallet";
+import { amountString, symOf, tokenOf } from "./assets";
 import { ALLOWANCE_MODULE, DAILY_RESET_MIN, USDC, allowanceAbi, safeModuleAbi } from "./chain";
 
 const units = (amount: number) => parseUnits(amount.toFixed(USDC.decimals), USDC.decimals);
@@ -37,8 +38,11 @@ export async function sendWithinAllowance(live: Live, to: string, amount: number
 type Calls = { to: string; value: string; data: string }[];
 
 /** The Safe calls a request needs, by kind. */
-export async function callsFor(req: { kind: string; to?: string; amount?: number; change?: { kind: string; limit?: number; to?: number } }, owner: string, safe: string): Promise<Calls | "removeGuardian"> {
-  if (req.kind === "transfer") return [buildTransfer(USDC, req.to!, String(req.amount))];
+export async function callsFor(req: { kind: string; to?: string; amount?: number; token?: string; change?: { kind: string; limit?: number; to?: number } }, owner: string, safe: string): Promise<Calls | "removeGuardian"> {
+  if (req.kind === "transfer") {
+    const token = symOf(req);
+    return [buildTransfer(tokenOf(token), req.to!, amountString(req.amount!, token))];
+  }
   const c = req.change!;
   const setAllowance = (limit: number) => ({
     to: ALLOWANCE_MODULE,

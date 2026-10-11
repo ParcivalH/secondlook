@@ -10,10 +10,10 @@ import { checkGuardedSafe } from "@/lib/safeCheck";
 import { executeOnLedger, signMessageOnLedger } from "@/lib/guardian";
 import { ledgerError } from "@/lib/ledger";
 import { assess, timeline } from "@/lib/second-look/risk";
-import { USDC } from "@/lib/second-look/chain";
+import { amountString, symOf, tokenOf, usd } from "@/lib/second-look/assets";
 import { clearAccount, getAccount, liveAccount, requireLive, saveAccount } from "@/lib/second-look/account";
 import { HttpError, type Store } from "@/lib/second-look/lumi/store";
-import { aiInfo, getStore, ownerAllowance, renameAccount, resetHolder, safeUsdcBalance, save } from "@/lib/second-look/server";
+import { aiInfo, getStore, ownerAllowance, renameAccount, resetHolder, safeEthBalance, safeUsdcBalance, save } from "@/lib/second-look/server";
 
 const apiKit = () => new SafeApiKit({ chainId: BigInt(CHAIN_ID), apiKey: process.env.SAFE_API_KEY });
 
@@ -26,6 +26,7 @@ const Draft = z.object({
   owner: addr.optional(),
   txHash: z.string().optional(),
   route: z.enum(["allowance", "guardian"]).optional(),
+  token: z.enum(["USDC", "ETH"]).optional(),
 });
 const Turn = z.object({ text: z.string().max(2000).optional(), quick: z.union([z.literal(0), z.literal(1)]).optional() });
 const Decision = z.object({ decision: z.enum(["approve", "reject"]), note: z.string().max(280).optional() });
@@ -58,7 +59,7 @@ async function syncChain(owner?: string) {
   if (!liveAccount()) return { enabled: false, limit: 0, spent: 0, remaining: 0 };
   const allowance = await ownerAllowance(owner);
   if (Date.now() - lastSync > 10_000 || owner) {
-    store.syncChain({ balance: await safeUsdcBalance(), dailyLimit: allowance.enabled ? allowance.limit : undefined });
+    store.syncChain({ balance: await safeUsdcBalance(), ethBalance: await safeEthBalance(), dailyLimit: allowance.enabled ? allowance.limit : undefined });
     lastSync = Date.now();
   }
   return allowance;
@@ -78,7 +79,7 @@ async function view() {
     now: store.now(),
     names: { owner: acct?.ownerName ?? "Dad", guardian: acct?.guardianName ?? "Mia" },
     ai: aiInfo(),
-    account: { guardianActive: s.guardianActive, dailyLimit: s.dailyLimit, balance: s.balance, allowlist: s.allowlist, history: s.history.slice(0, 20) },
+    account: { guardianActive: s.guardianActive, dailyLimit: s.dailyLimit, balance: s.balance, ethBalance: s.ethBalance ?? 0, allowlist: s.allowlist, history: s.history.slice(0, 20) },
     remainingToday: assess({ to: "0x0000000000000000000000000000000000000000", amount: 0 }, store.context()).remainingToday,
     open: open ? { ...open, timeline: timeline(open.createdAt, store.now()) } : null,
     latest: s.requests[0] ?? null,
@@ -132,10 +133,18 @@ async function handle(req: Request, ctx: Ctx): Promise<Response> {
   if (route === "POST /assess") {
     const d = Draft.parse(body);
     const allowance = await syncChain(d.owner);
-    const assessment = assess(d, store.context());
+    const token = symOf(d);
+    const assessment = assess({ ...d, amount: usd(d.amount, token) }, store.context());
     // Low risk goes out under the on-chain allowance when there's room; otherwise it needs Mia.
+    // The allowance module here only covers USDC, so live ETH always goes to Mia.
     const route =
-      assessment.tier === "red" ? "guardian" : !LIVE ? "allowance" : allowance.enabled && d.amount <= allowance.remaining ? "allowance" : "guardian";
+      assessment.tier === "red"
+        ? "guardian"
+        : !LIVE
+          ? "allowance"
+          : token === "USDC" && allowance.enabled && d.amount <= allowance.remaining
+            ? "allowance"
+            : "guardian";
     return Response.json({ assessment, route, allowance });
   }
   if (id && route === `GET /requests/${id}`) return Response.json(store.get(id));
@@ -158,7 +167,8 @@ async function handle(req: Request, ctx: Ctx): Promise<Response> {
     const r = store.get(id);
     const tx = p.safeTransactionData;
     if (r.kind === "transfer") {
-      const expected = buildTransfer(USDC, r.to, String(r.amount));
+      const token = symOf(r);
+      const expected = buildTransfer(tokenOf(token), r.to, amountString(r.amount, token));
       if (getAddress(tx.to) !== getAddress(expected.to) || String(tx.value) !== expected.value || tx.data !== expected.data || tx.operation !== 0)
         throw new HttpError(400, "The signed transaction doesn't match this transfer");
     }

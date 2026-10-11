@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ago, api, hoursLeft, isOpen, money, short, type Brief, type Req, type SafeTxWire } from "./api";
 import { RiskScoreCard } from "./RiskScore";
+import { fmtAmount, symOf } from "@/lib/second-look/assets";
 import { ErrorText, Lit, Lumi, useApp } from "./shared";
 
 type Screen = { name: "inbox" } | { name: "brief" } | { name: "ledger"; action: "approve" | "reject" | "invite" };
@@ -76,7 +77,7 @@ function Inbox({ go }: { go: (s: Screen) => void }) {
             <span className="d" />
             Needs your decision
           </span>
-          <strong className="sub">{open.kind === "transfer" ? `${names.owner} wants to send ${money(open.amount)} USDC to a new address` : open.title}</strong>
+          <strong className="sub">{open.kind === "transfer" ? `${names.owner} wants to send ${fmtAmount(open.amount, symOf(open))} to a new address` : open.title}</strong>
           <span className="meta">
             Requested {ago(open.createdAt, state.now)} · expires in {hoursLeft(open, state.now)}h · reminder {Math.max(1, open.remindersSent ?? 1)} of 3 sent
           </span>
@@ -200,7 +201,7 @@ function BriefScreen({ req, note, setNote, go }: { req: Req; note: string; setNo
           <span className="pill look">Needs your look{brief ? (high ? " · High risk" : " · Unusual") : ""}</span>
           <span className="meta">{owner} is trying to send</span>
           <h2 className="big" style={{ fontSize: 36 }}>
-            {money(req.amount)} USDC to {req.label}
+            {fmtAmount(req.amount, symOf(req))} to {req.label}
           </h2>
           <span className="meta">
             {short(req.to)}
@@ -274,7 +275,7 @@ function LedgerScreen({ req, action, note, back }: { req: Req; action: "approve"
       : req.kind === "transfer"
         ? [
             ["Action", `${action === "approve" ? "Approve" : "Reject"} ${state.names.owner}'s transfer`],
-            ["Amount", `${money(req.amount)} USDC`],
+            ["Amount", fmtAmount(req.amount, symOf(req))],
             ["To", req.to],
           ]
         : [

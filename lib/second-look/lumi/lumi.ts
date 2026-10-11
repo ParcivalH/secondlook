@@ -14,6 +14,7 @@ import {
   type Pattern,
   type Question,
 } from "../risk";
+import { fmtAmount, symOf } from "../assets";
 import { LIMITS, cleanOwnerInput, safeText } from "./guardrails";
 import type { StructuredModel } from "./model";
 import { BRIEF_SYSTEM, TURN_SYSTEM } from "./prompts";
@@ -21,7 +22,6 @@ import { BriefOutput, TurnOutput } from "./schemas";
 import type { Conversation, GuardianBrief, TransferRequest } from "./types";
 
 const MAX_ATTEMPTS = 2;
-const money = (n: number) => n.toLocaleString("en-US", { maximumFractionDigits: 2 });
 
 export interface Names {
   owner: string;
@@ -154,7 +154,7 @@ export class Lumi {
   private async readWithModel(req: TransferRequest, lines: Conversation["lines"], flags: Flags): Promise<TurnOutput> {
     const user = [
       `Owner: ${this.names.owner}. Guardian: ${this.names.guardian}.`,
-      `Transfer: ${money(req.amount)} USDC to "${req.label}"${req.assessment.isNewAddress ? " (a new address)" : ""}.`,
+      `Transfer: ${fmtAmount(req.amount, symOf(req))} to "${req.label}"${req.assessment.isNewAddress ? " (a new address)" : ""}.`,
       `Why it was flagged:\n${req.assessment.signals.map((s) => `- ${s.text}`).join("\n")}`,
       `Facts settled so far (you may not change a "yes"): ${JSON.stringify(flags)}`,
       `Conversation so far:\n${lines
@@ -223,7 +223,7 @@ export class Lumi {
             : `This is unusual for ${owner}, but the answers don't match a known scam pattern. A quick call is still a good idea.`;
     return {
       risk: high ? ("high" as const) : ("elevated" as const),
-      headline: `${owner} wants to send ${money(req.amount)} USDC to ${req.label}`,
+      headline: `${owner} wants to send ${fmtAmount(req.amount, symOf(req))} to ${req.label}`,
       // Only what he typed himself; tapped quick replies are already in the "told" lines.
       inTheirWords: req.conversation.lines
         .filter((l) => l.from === "owner" && !quick.has(l.text.toLowerCase()))
@@ -238,7 +238,7 @@ export class Lumi {
     const c = req.conversation;
     return [
       `Owner: ${this.names.owner}. Guardian: ${this.names.guardian}.`,
-      `Transfer: ${money(req.amount)} USDC to "${req.label}"${req.assessment.isNewAddress ? " (a new address)" : ""}.`,
+      `Transfer: ${fmtAmount(req.amount, symOf(req))} to "${req.label}"${req.assessment.isNewAddress ? " (a new address)" : ""}.`,
       `Rule-based signals:\n${req.assessment.signals.map((s) => `- [${s.code}] ${s.text}`).join("\n")}`,
       `Settled facts: ${JSON.stringify(c.flags)}. Pattern so far: ${c.pattern}.`,
       `Lines already shown to the guardian:\n${told.map((t) => `- ${t}`).join("\n")}`,

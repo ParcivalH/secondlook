@@ -159,6 +159,7 @@ export function packSignature(sig: { r: string; s: string; v: number }): `0x${st
 export function describeSafeTx(tx: SafeTxFields): string {
   const data = (tx.data || "0x") as `0x${string}`;
   if (Number(tx.operation) === 1) return "Setup batch: turn on the daily allowance";
+  if (data === "0x" && BigInt(tx.value) > BigInt(0)) return `ETH transfer of ${formatUnits(BigInt(tx.value), 18)} to ${tx.to}`;
   try {
     if (getAddress(tx.to) === getAddress(USDC.address!)) {
       const d = decodeFunctionData({ abi: erc20Abi, data });

@@ -72,7 +72,9 @@ export interface TransferRequest extends BaseRequest {
   kind: "transfer";
   to: string;
   label: string;
+  /** In units of `token` (USDC if missing). */
   amount: number;
+  token?: "USDC" | "ETH";
   assessment: Assessment;
   conversation: Conversation;
   brief?: GuardianBrief;

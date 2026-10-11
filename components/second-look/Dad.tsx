@@ -6,10 +6,12 @@ import { ago, api, hoursLeft, isOpen, liveOf, money, short, type AssessResult, t
 import { executeApproved, ownerAddress, sendWithinAllowance, signAndPropose } from "@/lib/second-look/owner-client";
 import { ErrorText, Lit, Lumi, Pill, useApp } from "./shared";
 import { etherscanTxUrl } from "@/lib/config";
+import { SYMBOLS, fitsDecimals, fmtAmount, symOf, tokenOf, usd, type Sym } from "@/lib/second-look/assets";
 
 type Screen = "home" | "send" | "review" | "chat" | "waiting" | "result" | "settings";
 interface Sent {
   amount: number;
+  token?: Sym;
   label: string;
   tier: "green" | "yellow" | "red";
 }
@@ -17,6 +19,8 @@ interface Draft {
   to: string;
   label: string;
   amount: string;
+  /** USDC if not set */
+  token?: Sym;
   pasted?: boolean;
   mode: "contact" | "new";
 }
@@ -217,6 +221,7 @@ function Home({ go }: { go: (s: Screen) => void }) {
         <div className="big">
           {money(account.balance)} <span>USDC</span>
         </div>
+        <span className="meta">{fmtAmount(account.ethBalance ?? 0, "ETH")}</span>
       </div>
       <div className="card">
         <div className="row" style={{ justifyContent: "space-between" }}>
@@ -233,7 +238,7 @@ function Home({ go }: { go: (s: Screen) => void }) {
       {isOpen(open) && (
         <button className="box tint-yel" type="button" onClick={() => go(open.status === "chat" ? "chat" : "waiting")} style={{ border: "none", textAlign: "left", color: "inherit", font: "inherit" }}>
           <strong>Waiting on {names.guardian}</strong>
-          <span className="li">{open.kind === "transfer" ? `${money(open.amount)} USDC to ${open.label}` : open.title} · tap to view</span>
+          <span className="li">{open.kind === "transfer" ? `${fmtAmount(open.amount, symOf(open))} to ${open.label}` : open.title} · tap to view</span>
         </button>
       )}
       {state.mode === "live" && state.latest?.status === "approved" && state.latest.safeTx && !state.latest.safeTx.executedTxHash && (
@@ -260,7 +265,7 @@ function Home({ go }: { go: (s: Screen) => void }) {
                 <br />
                 <span className="meta">{ago(h.ts, state.now)}</span>
               </span>
-              <b>−{money(h.amount)}</b>
+              <b>−{h.token ? fmtAmount(h.tokenAmount ?? h.amount, h.token) : money(h.amount)}</b>
             </div>
           ))}
         </div>
@@ -273,6 +278,8 @@ function Send({ draft, setDraft, go }: { draft: Draft; setDraft: (d: Draft) => v
   const { state } = useApp();
   const [err, setErr] = useState<string | null>(null);
   const set = (p: Partial<Draft>) => setDraft({ ...draft, ...p });
+  const token = symOf(draft);
+  const balance = token === "ETH" ? (state.account.ethBalance ?? 0) : state.account.balance;
   return (
     <div className="stack fade">
       <Head back="home" go={go} />
@@ -302,8 +309,18 @@ function Send({ draft, setDraft, go }: { draft: Draft; setDraft: (d: Draft) => v
           </label>
         </>
       )}
+      <span className="field" style={{ margin: 0 }}>
+        Token
+      </span>
+      <div className="row">
+        {SYMBOLS.map((t) => (
+          <button key={t} className="chip" type="button" aria-pressed={token === t} onClick={() => set({ token: t })}>
+            {t} · {fmtAmount(t === "ETH" ? (state.account.ethBalance ?? 0) : state.account.balance, t)}
+          </button>
+        ))}
+      </div>
       <label className="field">
-        Amount (USDC)
+        Amount ({token})
         <input type="text" inputMode="decimal" placeholder="0" value={draft.amount} onChange={(e) => set({ amount: e.target.value })} />
       </label>
       <ErrorText msg={err} />
@@ -315,7 +332,8 @@ function Send({ draft, setDraft, go }: { draft: Draft; setDraft: (d: Draft) => v
           if (!draft.to) return setErr("Choose who you're paying, or paste a new address.");
           if (!/^0x[0-9a-fA-F]{40}$/.test(draft.to)) return setErr("That address doesn't look right. It should start with 0x and have 42 characters.");
           if (!(amt > 0)) return setErr("Enter an amount above 0.");
-          if (amt > state.account.balance) return setErr(`That's more than your balance of ${money(state.account.balance)} USDC.`);
+          if (!fitsDecimals(amt, token)) return setErr(`${token} allows at most ${tokenOf(token).decimals} decimals.`);
+          if (amt > balance) return setErr(`That's more than your balance of ${fmtAmount(balance, token)}.`);
           go("review");
         }}
       >
@@ -345,6 +363,7 @@ function Review({ draft, go, onSent }: { draft: Draft; go: (s: Screen) => void; 
   const { state, refresh } = useApp();
   const g = state.names.guardian;
   const amount = Number(draft.amount.replace(/,/g, ""));
+  const token = symOf(draft);
   const [res, setRes] = useState<AssessResult | null>(null);
   const a: Assessment | null = res?.assessment ?? null;
   const live = state.mode === "live";
@@ -356,9 +375,9 @@ function Review({ draft, go, onSent }: { draft: Draft; go: (s: Screen) => void; 
   useEffect(() => {
     (async () => {
       const owner = live ? await ownerAddress({ safe, owner: setupOwner }) : undefined;
-      setRes(await api.assess({ to: draft.to, amount, pasted: draft.pasted, owner }));
+      setRes(await api.assess({ to: draft.to, amount, token, pasted: draft.pasted, owner }));
     })().catch((e: Error) => setErr(e.message));
-  }, [draft.to, amount, draft.pasted, live, safe, setupOwner]);
+  }, [draft.to, amount, token, draft.pasted, live, safe, setupOwner]);
 
   if (!a) return <div className="stack">{err ? <ErrorText msg={err} /> : <span className="meta">Checking…</span>}</div>;
   const tone = a.tier === "red" ? "red" : a.tier === "yellow" ? "yellow" : "green";
@@ -374,12 +393,12 @@ function Review({ draft, go, onSent }: { draft: Draft; go: (s: Screen) => void; 
   async function sign() {
     setBusy(true);
     try {
-      const base = { to: draft.to, amount, label: draft.label, pasted: draft.pasted };
+      const base = { to: draft.to, amount, token, label: draft.label, pasted: draft.pasted };
       if (live && res!.route === "allowance") {
         // Everyday transfer: Dad's MetaMask sends it through the on-chain daily allowance. No Mia.
         const txHash = await sendWithinAllowance(liveOf(state), draft.to, amount);
         await api.transfer({ ...base, txHash, route: "allowance" });
-        onSent({ amount, label: draft.label || "New contact", tier: a!.tier });
+        onSent({ amount, token, label: draft.label || "New contact", tier: a!.tier });
         await refresh();
         return go("result");
       }
@@ -390,7 +409,7 @@ function Review({ draft, go, onSent }: { draft: Draft; go: (s: Screen) => void; 
         await refresh();
         return go("waiting");
       }
-      onSent(r.request ? null : { amount, label: draft.label || "New contact", tier: r.assessment.tier });
+      onSent(r.request ? null : { amount, token, label: draft.label || "New contact", tier: r.assessment.tier });
       await refresh();
       go(r.request ? (r.request.status === "chat" ? "chat" : "waiting") : "result");
     } catch (e) {
@@ -407,8 +426,9 @@ function Review({ draft, go, onSent }: { draft: Draft; go: (s: Screen) => void; 
       <div className="card">
         <span className="meta">You're sending</span>
         <span className="big">
-          {money(amount)} <span>USDC</span>
+          {fmtAmount(amount, token).split(" ")[0]} <span>{token}</span>
         </span>
+        {token === "ETH" && <span className="meta">≈ {money(usd(amount, token))} USD for the daily limit and risk check</span>}
         <strong style={{ fontSize: 15 }}>
           To {draft.label || "New contact"}
           {known ? "" : " · new address"}
@@ -447,10 +467,10 @@ function Chat({ req, go }: { req: TransferReq; go: (s: Screen) => void }) {
   const end = useRef<HTMLDivElement>(null);
   const current = QUESTIONS.find((q) => c.flags[q.id] === "unclear" && (c.attempts[q.id] ?? 0) < 2);
 
-    useEffect(() => {
+  useEffect(() => {
     end.current?.scrollIntoView({ block: "nearest" });
   }, [c.lines.length, busy]);
-  
+
   async function send(body: { text?: string; quick?: 0 | 1 }) {
     setBusy(true);
     setErr(null);
@@ -564,7 +584,7 @@ function Waiting({ go }: { go: (s: Screen) => void }) {
       </div>
       <h1 className="title">Waiting for {g}'s confirmation</h1>
       <p>
-        {r.kind === "transfer" ? `Your ${money(r.amount)} USDC is on hold and safe.` : `${r.title} is on hold.`} If {g} doesn't respond within 24 hours, it's cancelled and nothing changes.
+        {r.kind === "transfer" ? `Your ${fmtAmount(r.amount, symOf(r))} is on hold and safe.` : `${r.title} is on hold.`} If {g} doesn't respond within 24 hours, it's cancelled and nothing changes.
       </p>
       <p className="meta">
         {g} has been reminded {Math.max(1, r.remindersSent ?? 1)} of 3 times.
@@ -621,20 +641,20 @@ function Result({ go, sent }: { go: (s: Screen) => void; sent: Sent | null }) {
         <Lumi pose="calm" />
         <h1 className="title">Sent</h1>
         <p>
-          {sent ? `${money(sent.amount)} USDC to ${sent.label}.` : "Your transfer went out."}
+          {sent ? `${fmtAmount(sent.amount, symOf(sent))} to ${sent.label}.` : "Your transfer went out."}
           {sent?.tier === "yellow" ? ` ${g} got a heads-up because it's a new address.` : ""}
         </p>
         {back}
       </div>
     );
-  const what = r.kind === "transfer" ? `${money(r.amount)} USDC to ${r.label}` : r.title;
+  const what = r.kind === "transfer" ? `${fmtAmount(r.amount, symOf(r))} to ${r.label}` : r.title;
   if (r.status === "rejected")
     return (
       <div className="stack fade">
         <div className="box tint-red" style={{ borderRadius: "var(--r-lg)", padding: 20 }}>
           <h1 className="title">{r.kind === "transfer" ? "This transfer didn't go through" : "This change wasn't made"}</h1>
           <p>
-            {g} reviewed it and decided to hold off.{r.kind === "transfer" ? ` Your ${money(r.amount)} USDC is safe.` : ""}
+            {g} reviewed it and decided to hold off.{r.kind === "transfer" ? ` Your ${fmtAmount(r.amount, symOf(r))} is safe.` : ""}
           </p>
         </div>
         {r.kind === "transfer" && <p>You didn't do anything wrong. These situations are designed by professionals to feel real, and they fool careful people every day.</p>}
@@ -696,7 +716,7 @@ function SendNow({ req, go }: { req: Req; go: (s: Screen) => void }) {
   const { state, refresh } = useApp();
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const what = req.kind === "transfer" ? `${money(req.amount)} USDC to ${req.label}` : req.title;
+  const what = req.kind === "transfer" ? `${fmtAmount(req.amount, symOf(req))} to ${req.label}` : req.title;
   return (
     <div className="stack center fade" style={{ paddingTop: 20 }}>
       <Lumi pose="calm" />

@@ -1,3 +1,4 @@
+import type { Sym } from "@/lib/second-look/assets";
 import type { Assessment, Contact, Flags, Pattern, RequestStatus, RiskScore, RuleChange } from "@/lib/second-look/risk";
 
 export interface ChatLine {
@@ -41,6 +42,7 @@ export interface TransferReq extends Base {
   to: string;
   label: string;
   amount: number;
+  token?: Sym;
   assessment: Assessment;
   conversation: Conversation;
 }
@@ -83,8 +85,10 @@ export interface State {
     guardianActive: boolean;
     dailyLimit: number;
     balance: number;
+    ethBalance?: number;
     allowlist: Contact[];
-    history: { addr: string; label: string; amount: number; ts: number; txHash?: string }[];
+    /** amount = USD value; tokenAmount + token = what moved */
+    history: { addr: string; label: string; amount: number; ts: number; txHash?: string; token?: Sym; tokenAmount?: number }[];
   };
   remainingToday: number;
   open: Req | null;
@@ -125,8 +129,8 @@ export interface AssessResult {
 
 export const api = {
   state: () => call<State>("/state"),
-  assess: (d: { to: string; amount: number; pasted?: boolean; owner?: string }) => call<AssessResult>("/assess", d),
-  transfer: (d: { to: string; amount: number; label?: string; pasted?: boolean; txHash?: string; route?: "allowance" | "guardian" }) =>
+  assess: (d: { to: string; amount: number; token?: Sym; pasted?: boolean; owner?: string }) => call<AssessResult>("/assess", d),
+  transfer: (d: { to: string; amount: number; token?: Sym; label?: string; pasted?: boolean; txHash?: string; route?: "allowance" | "guardian" }) =>
     call<{ assessment: Assessment; request: Req | null }>("/transfers", d),
   turn: (id: string, body: { text?: string; quick?: 0 | 1 }) => call<TransferReq>(`/requests/${id}/turn`, body),
   submit: (id: string) => call<Req>(`/requests/${id}/submit`, {}),

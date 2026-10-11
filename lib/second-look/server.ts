@@ -1,6 +1,6 @@
 import { promises as fs } from "fs";
 import path from "path";
-import { createPublicClient, erc20Abi, formatUnits, getAddress, http } from "viem";
+import { createPublicClient, erc20Abi, formatEther, formatUnits, getAddress, http } from "viem";
 import { sepolia } from "viem/chains";
 import { ALLOWANCE_MODULE, USDC, allowanceAbi, safeModuleAbi } from "./chain";
 import { liveAccount } from "./account";
@@ -70,6 +70,17 @@ export async function safeUsdcBalance(): Promise<number | undefined> {
   try {
     const raw = await client().readContract({ address: USDC.address!, abi: erc20Abi, functionName: "balanceOf", args: [account.safeAddress] });
     return Number(formatUnits(raw, USDC.decimals));
+  } catch {
+    return undefined;
+  }
+}
+
+/** The Safe's ETH balance (live mode). */
+export async function safeEthBalance(): Promise<number | undefined> {
+  const account = liveAccount();
+  if (!account) return undefined;
+  try {
+    return Number(formatEther(await client().getBalance({ address: account.safeAddress })));
   } catch {
     return undefined;
   }

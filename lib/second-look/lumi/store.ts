@@ -11,6 +11,7 @@ import {
   type RuleChange,
   type TransferDraft,
 } from "../risk";
+import { fitsDecimals, fmtAmount, symOf, usd, type Sym } from "../assets";
 import type { Lumi, Names } from "./lumi";
 import type { GuardRequest, LedgerMessage, PendingSafeTx, TransferRequest } from "./types";
 
@@ -22,9 +23,13 @@ export interface FeedItem {
 export interface AccountState {
   guardianActive: boolean;
   dailyLimit: number;
+  /** USDC in the account. */
   balance: number;
+  /** ETH in the account. */
+  ethBalance?: number;
   allowlist: Contact[];
-  history: (PastTransfer & { label: string; txHash?: string; requestId?: string })[];
+  /** `amount` is the USD value (what the risk rules and the daily limit count); `tokenAmount` + `token` is what moved. */
+  history: (PastTransfer & { label: string; txHash?: string; requestId?: string; token?: Sym; tokenAmount?: number })[];
   flagged: string[];
   requests: GuardRequest[];
   /** Heads-ups for the guardian (yellow transfers, lowered limit). No action needed. */
@@ -46,6 +51,7 @@ export function demoAccount(now: number, protectedFromStart = true): AccountStat
     guardianActive: protectedFromStart,
     dailyLimit: 200,
     balance: 8060,
+    ethBalance: 1.2,
     allowlist: [
       { addr: grocery, label: "Corner grocery" },
       { addr: pharmacy, label: "Riverside pharmacy" },
@@ -72,6 +78,7 @@ export function liveAccount(): AccountState {
     guardianActive: true,
     dailyLimit: Number(process.env.DAILY_LIMIT_USDC ?? 200),
     balance: 0,
+    ethBalance: 0,
     allowlist: [],
     history: [],
     flagged: ["0xdead00000000000000000000000000000000beef"],
@@ -115,8 +122,9 @@ export class Store {
   }
 
   /** Live mode keeps the balance and the daily limit in step with the chain. */
-  syncChain(c: { balance?: number; dailyLimit?: number }) {
+  syncChain(c: { balance?: number; ethBalance?: number; dailyLimit?: number }) {
     if (c.balance !== undefined) this.state.balance = c.balance;
+    if (c.ethBalance !== undefined) this.state.ethBalance = c.ethBalance;
     if (c.dailyLimit !== undefined && c.dailyLimit > 0) this.state.dailyLimit = c.dailyLimit;
   }
 
@@ -145,7 +153,8 @@ export class Store {
 
   context(): AccountContext {
     const s = this.state;
-    return { dailyLimit: s.dailyLimit, balance: s.balance, allowlist: s.allowlist, history: s.history, flagged: s.flagged, now: this.now() };
+    // Risk rules see the whole account in USD
+    return { dailyLimit: s.dailyLimit, balance: s.balance + usd(s.ethBalance ?? 0, "ETH"), allowlist: s.allowlist, history: s.history, flagged: s.flagged, now: this.now() };
   }
 
   openRequest(): GuardRequest | undefined {
@@ -184,30 +193,33 @@ export class Store {
   }
 
   /** Owner starts a transfer. Green and yellow go out under the on-chain allowance; red opens a request. */
-  startTransfer(draft: TransferDraft & { label?: string; txHash?: string; route?: "allowance" | "guardian" }) {
+  startTransfer(draft: TransferDraft & { label?: string; txHash?: string; route?: "allowance" | "guardian"; token?: Sym }) {
     this.tick();
     if (!this.state.guardianActive) throw new HttpError(409, "Protection isn't set up yet");
     if (!/^0x[0-9a-fA-F]{40}$/.test(draft.to)) throw new HttpError(400, "That address doesn't look right");
     if (!(draft.amount > 0)) throw new HttpError(400, "Enter an amount above 0");
+    const token = symOf(draft);
+    if (!fitsDecimals(draft.amount, token)) throw new HttpError(400, `Too many decimals for ${token}`);
+    const balance = token === "ETH" ? (this.state.ethBalance ?? 0) : this.state.balance;
     // Live mode reads the balance from the chain; if that read failed (0), let the Safe itself refuse.
-    if ((this.mode === "demo" || this.state.balance > 0) && draft.amount > this.state.balance) throw new HttpError(400, "That's more than the balance");
+    if ((this.mode === "demo" || balance > 0) && draft.amount > balance) throw new HttpError(400, `That's more than your ${token} balance`);
     const label = (draft.label ?? "").trim() || "New contact";
-    const assessment = assess(draft, this.context());
+    const assessment = assess({ ...draft, amount: usd(draft.amount, token) }, this.context());
 
     // Low risk but the Safe has no daily allowance set up yet: it still needs Mia, without a chat.
     if (assessment.tier !== "red" && draft.route === "guardian") {
       if (this.openRequest()) throw new HttpError(409, `One request is already waiting on ${this.names.guardian}`);
       const conversation = { ...this.lumi.open({ assessment }), lines: [], done: true };
-      const request: TransferRequest = { id: `r${this.now().toString(36)}`, kind: "transfer", createdAt: this.now(), status: "pending", to: draft.to, label, amount: draft.amount, assessment, conversation };
+      const request: TransferRequest = { id: `r${this.now().toString(36)}`, kind: "transfer", createdAt: this.now(), status: "pending", to: draft.to, label, amount: draft.amount, token, assessment, conversation };
       this.state.requests.unshift(request);
       this.tick();
       return { assessment, request };
     }
 
     if (assessment.tier !== "red") {
-      this.recordTransfer(draft.to, label, draft.amount, draft.txHash);
+      this.recordTransfer(draft.to, label, token, draft.amount, draft.txHash);
       if (assessment.notifyGuardian)
-        this.state.fyi.unshift({ ts: this.now(), text: `${this.names.owner} sent ${money(draft.amount)} USDC to ${label} (new address)` });
+        this.state.fyi.unshift({ ts: this.now(), text: `${this.names.owner} sent ${fmtAmount(draft.amount, token)} to ${label} (new address)` });
       return { assessment, request: null };
     }
 
@@ -221,6 +233,7 @@ export class Store {
       to: draft.to,
       label,
       amount: draft.amount,
+      token,
       assessment,
       conversation: this.lumi.open(base),
     };
@@ -278,7 +291,7 @@ export class Store {
     this.state.log.unshift({ ts: this.now(), text: `${ok ? "Approved" : "Rejected"}: ${describe(r)}` });
 
     if (ok && r.kind === "transfer") {
-      this.recordTransfer(r.to, r.label, r.amount, d.executedTxHash, r.id);
+      this.recordTransfer(r.to, r.label, symOf(r), r.amount, d.executedTxHash, r.id);
       if (!this.state.allowlist.some((c) => c.addr.toLowerCase() === r.to.toLowerCase())) this.state.allowlist.push({ addr: r.to, label: r.label });
     }
     if (ok && r.kind === "rule") this.applyRule(r.change);
@@ -341,12 +354,13 @@ export class Store {
     return { title: `Remove you as ${owner}'s guardian`, detail: `${owner} would be able to send any amount without a second look.` };
   }
 
-  private recordTransfer(addr: string, label: string, amount: number, txHash?: string, requestId?: string) {
-    this.state.history.unshift({ addr, label, amount, ts: this.now(), txHash, requestId });
-    this.state.balance -= amount;
+  private recordTransfer(addr: string, label: string, token: Sym, amount: number, txHash?: string, requestId?: string) {
+    this.state.history.unshift({ addr, label, amount: usd(amount, token), token, tokenAmount: amount, ts: this.now(), txHash, requestId });
+    if (token === "ETH") this.state.ethBalance = (this.state.ethBalance ?? 0) - amount;
+    else this.state.balance -= amount;
   }
 }
 
 function describe(r: GuardRequest): string {
-  return r.kind === "transfer" ? `${money(r.amount)} USDC to ${r.label}` : r.title;
+  return r.kind === "transfer" ? `${fmtAmount(r.amount, symOf(r))} to ${r.label}` : r.title;
 }
