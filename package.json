@@ -9,9 +9,14 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@ledgerhq/hw-app-eth": "^7.10.0",
+    "@ledgerhq/hw-transport-node-speculos-http": "^6.36.7",
+    "@safe-global/api-kit": "^5.0.3",
+    "@safe-global/protocol-kit": "^8.0.7",
     "next": "16.4.0",
     "react": "19.3.0",
-    "react-dom": "19.3.0"
+    "react-dom": "19.3.0",
+    "viem": "^2.57.4"
   },
   "devDependencies": {
     "@tailwindcss/turbopack": "^4",
