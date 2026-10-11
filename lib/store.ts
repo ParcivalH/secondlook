@@ -1,10 +1,16 @@
+// Tiny JSON-file store for transfers, so the owner and guardian sides share the same context.
+// Server-only. Good enough for a single-machine demo.
 import { promises as fs } from "fs";
 import path from "path";
 import type { RiskResult } from "./risk";
 
 export type TransferRecord = {
   safeTxHash: string;
+  safeAddress: string;
   owner: string;
+  ownerName: string;
+  guardian: string;
+  guardianName: string;
   recipient: string;
   amount: string;
   token: string;
@@ -43,6 +49,9 @@ export async function listTransfers() {
   return Object.values(await readAll()).sort((a, b) => b.createdAt - a.createdAt);
 }
 
-export async function hasSentTo(recipient: string) {
-  return (await listTransfers()).some((t) => t.recipient.toLowerCase() === recipient.toLowerCase());
+// Has this Safe sent to this recipient before?
+export async function hasSentTo(safeAddress: string, recipient: string) {
+  return (await listTransfers()).some(
+    (t) => t.safeAddress.toLowerCase() === safeAddress.toLowerCase() && t.recipient.toLowerCase() === recipient.toLowerCase(),
+  );
 }
