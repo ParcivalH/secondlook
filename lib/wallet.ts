@@ -1,5 +1,4 @@
 import { getAddress, type EIP1193Provider } from "viem";
-import { SAFE_ADDRESS } from "./config";
 
 declare global {
   interface Window {
@@ -18,10 +17,10 @@ export async function connectOwnerWallet(): Promise<`0x${string}`> {
   return getAddress(account);
 }
 
-export async function openSafe(signer: string) {
+export async function openSafe(signer: string, safeAddress: string) {
   const { default: Safe } = await import("@safe-global/protocol-kit");
   type SafeProvider = Parameters<typeof Safe.init>[0]["provider"];
-  const kit = await Safe.init({ provider: window.ethereum as unknown as SafeProvider, signer, safeAddress: SAFE_ADDRESS });
+  const kit = await Safe.init({ provider: window.ethereum as unknown as SafeProvider, signer, safeAddress });
   if (!(await kit.isOwner(signer))) throw new Error(`${signer} is not an owner of this Safe`);
   return kit;
 }

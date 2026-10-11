@@ -1,12 +1,12 @@
-import SafeApiKit from "@safe-global/api-kit";
 import { getAddress, isAddress } from "viem";
-import { CHAIN_ID, EXPIRY_MS, SAFE_ADDRESS } from "@/lib/config";
+import { EXPIRY_MS } from "@/lib/config";
 import { findToken } from "@/lib/tokens";
 import { buildTransfer } from "@/lib/buildTransfer";
 import { safeTxHashes } from "@/lib/safeHash";
+import { apiKit, checkGuardedSafe } from "@/lib/safeCheck";
 import { getTransfer, saveTransfer } from "@/lib/store";
 
-const apiKit = () => new SafeApiKit({ chainId: BigInt(CHAIN_ID), apiKey: process.env.SAFE_API_KEY });
+const cleanName = (s: unknown, fallback: string) => (typeof s === "string" && s.trim() ? s.trim().slice(0, 40) : fallback);
 
 export async function POST(req: Request) {
   const b = await req.json().catch(() => null);
@@ -14,23 +14,33 @@ export async function POST(req: Request) {
   if (!token || !isAddress(b?.recipient ?? "") || !isAddress(b?.senderAddress ?? "") || !b?.safeTransactionData || !b?.senderSignature) {
     return Response.json({ error: "Missing or invalid fields" }, { status: 400 });
   }
+
+  // 0. The Safe comes from the user, so check it on every request: 2-of-2 and the sender is an owner
+  let safe;
+  try {
+    safe = await checkGuardedSafe(b.safeAddress, b.senderAddress);
+  } catch (err) {
+    return Response.json({ error: err instanceof Error ? err.message : "Invalid Safe" }, { status: 400 });
+  }
   const tx = b.safeTransactionData;
 
+  // 1. The signed transaction must be exactly what the owner typed (recipient, amount, token)
   const expected = buildTransfer(token, b.recipient, b.amount);
   if (getAddress(tx.to) !== getAddress(expected.to) || String(tx.value) !== expected.value || tx.data !== expected.data || tx.operation !== 0) {
     return Response.json({ error: "Signed transaction does not match the transfer details" }, { status: 400 });
   }
-  const { safeTxHash } = safeTxHashes(SAFE_ADDRESS, tx);
+  // 2. Recompute the safeTxHash ourselves instead of trusting the browser
+  const { safeTxHash } = safeTxHashes(safe.safeAddress, tx);
   if (safeTxHash.toLowerCase() !== String(b.safeTxHash).toLowerCase()) {
     return Response.json({ error: "safeTxHash mismatch" }, { status: 400 });
   }
 
   try {
     await apiKit().proposeTransaction({
-      safeAddress: SAFE_ADDRESS,
+      safeAddress: safe.safeAddress,
       safeTransactionData: tx,
       safeTxHash,
-      senderAddress: getAddress(b.senderAddress),
+      senderAddress: safe.owner,
       senderSignature: b.senderSignature,
       origin: "SecondLook",
     });
@@ -42,7 +52,11 @@ export async function POST(req: Request) {
   const now = Date.now();
   await saveTransfer({
     safeTxHash,
-    owner: getAddress(b.senderAddress),
+    safeAddress: safe.safeAddress,
+    owner: safe.owner,
+    ownerName: cleanName(b.ownerName, "Owner"),
+    guardian: safe.guardian,
+    guardianName: cleanName(b.guardianName, "Guardian"),
     recipient: getAddress(b.recipient),
     amount: b.amount,
     token: token.symbol,

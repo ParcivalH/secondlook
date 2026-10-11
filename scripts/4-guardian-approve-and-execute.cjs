@@ -19,7 +19,7 @@ const { sepolia } = require("viem/chains");
 const PATH = "44'/60'/0'/0/0";
 const CHAIN_ID = 11155111;
 const ZERO = "0x0000000000000000000000000000000000000000";
-const { SAFE_ADDRESS, SAFE_API_KEY, SEPOLIA_RPC_URL } = process.env;
+const { SAFE_API_KEY, SEPOLIA_RPC_URL } = process.env;
 
 const KNOWN_TOKENS = {
   "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238": { symbol: "USDC", decimals: 6 },
@@ -95,14 +95,18 @@ async function main() {
   const client = createPublicClient({ chain: sepolia, transport: http(SEPOLIA_RPC_URL) });
   console.log("Guardian Ledger:", guardian, `(gas balance ${formatEther(await client.getBalance({ address: guardian }))} ETH)`);
 
-  // 2. Pending transfer (by safeTxHash argument, or lowest nonce)
-  const apiKit = new SafeApiKit({ chainId: BigInt(CHAIN_ID), apiKey: SAFE_API_KEY });
-  const pending = (await apiKit.getPendingTransactions(SAFE_ADDRESS)).results;
+    // 2. The transfer to review: pass its safeTxHash (shown on the owner's waiting page, after "tx=")
   const wanted = process.argv[2];
-  const tx = wanted
-    ? pending.find((t) => t.safeTxHash.toLowerCase() === wanted.toLowerCase())
-    : pending.sort((a, b) => Number(a.nonce) - Number(b.nonce))[0];
-  if (!tx) throw new Error("No pending transaction");
+  if (!wanted) throw new Error("Usage: node --env-file=.env.local scripts/4-guardian-approve-and-execute.cjs <safeTxHash>");
+  const apiKit = new SafeApiKit({ chainId: BigInt(CHAIN_ID), apiKey: SAFE_API_KEY });
+  const tx = await apiKit.getTransaction(wanted);
+  if (tx.isExecuted) throw new Error("This transfer was already executed");
+  const SAFE_ADDRESS = getAddress(tx.safe); // the Safe comes from the transfer itself, not from config
+
+  // The Ledger must be the other owner of this Safe
+  const info = await apiKit.getSafeInfo(SAFE_ADDRESS);
+  if (!info.owners.map((o) => getAddress(o)).includes(guardian)) throw new Error(`This Ledger is not an owner of Safe ${SAFE_ADDRESS}`);
+  console.log("Safe:", SAFE_ADDRESS);
 
   const status = appStatus(tx.safeTxHash);
   if (status === "cancelled" || status === "expired") throw new Error(`This transfer was ${status} in SecondLook. Not executing.`);
