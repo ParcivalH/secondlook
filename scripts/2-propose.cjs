@@ -38,11 +38,7 @@ async function main() {
   const kit = await Safe.init({ provider: SEPOLIA_RPC_URL, safeAddress: SAFE_ADDRESS });
   if (!(await kit.isOwner(ledger))) throw new Error("Ledger is not an owner of this Safe");
 
-  // TODO 1：写交易单
-  // 提示：kit.createTransaction({ transactions: [ { to: ..., value: ..., data: ... } ] })
-  //       to 填 RECIPIENT；value 填 parseEther(AMOUNT_ETH).toString()；data 填 "0x"
-  //       注意这个函数要用 await
-  const safeTx = null;
+  const safeTx = await kit.createTransaction({ transactions: [ { to: RECIPIENT, value: parseEther(AMOUNT_ETH).toString(), data: "0x" } ] }); 
   const tx = safeTx.data;
   console.log("Safe tx:", tx);
 
@@ -60,32 +56,28 @@ async function main() {
     },
   });
 
-  // TODO 2：safeTxHash = keccak256( "0x1901" + domainSeparator + structHash )
-  // 提示：keccak256(concat([ 第一部分, 第二部分, 第三部分 ]))
-  const safeTxHash = null;
+  const safeTxHash = keccak256(concat(["0x19", "0x01", domainSeparator, structHash]));
   if (safeTxHash !== (await kit.getTransactionHash(safeTx))) throw new Error("hash mismatch");
   console.log("safeTxHash:", safeTxHash);
 
-  console.log(">>> 去 http://localhost:5001 在模拟器上确认签名");
+  console.log(">>> Approve the signature on the emulator: http://localhost:5001");
   const sig = await eth.signEIP712HashedMessage(PATH, domainSeparator.slice(2), structHash.slice(2));
 
-  // TODO 3：签名 = "0x" + r + s + v(十六进制)
-  // 提示：sig.r、sig.s 是不带 0x 的字符串；sig.v 是 27 或 28，sig.v.toString(16) 会变成 "1b" 或 "1c"
-  const signature = null;
+  const signature =  "0x" + sig.r + sig.s + sig.v.toString(16);
   const signer = await recoverAddress({ hash: safeTxHash, signature });
   if (getAddress(signer) !== ledger) throw new Error("signature does not match Ledger");
   console.log("Signature OK from", signer);
 
-  // TODO 4：提交给 Safe 服务器
-  // 提示：const apiKit = new SafeApiKit({ chainId: BigInt(CHAIN_ID), apiKey: SAFE_API_KEY });
-  //       await apiKit.proposeTransaction({
-  //         safeAddress: ..., safeTransactionData: ..., safeTxHash: ...,
-  //         senderAddress: ..., senderSignature: ...,
-  //       });
-  //       想想每个 ... 应该填上面哪个变量
+    const apiKit = new SafeApiKit({ chainId: BigInt(CHAIN_ID), apiKey: SAFE_API_KEY });
+  await apiKit.proposeTransaction({
+    safeAddress: SAFE_ADDRESS,
+    safeTransactionData: tx,
+    safeTxHash: safeTxHash,
+    senderAddress: ledger,
+    senderSignature: signature,
+  });
 
-
-  console.log("Proposed! 打开 Safe 查看：");
+  console.log("Proposed! Open Safe to check:");
   console.log(`https://app.safe.global/transactions/queue?safe=sep:${SAFE_ADDRESS}`);
   await transport.close();
 }
