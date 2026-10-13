@@ -192,7 +192,7 @@ function Setup() {
         <span className="li">This protects you if someone ever pressures you to turn protection off. Lowering the limit works right away.</span>
       </div>
       <label className="row" style={{ alignItems: "center", gap: 12, fontSize: 16 }}>
-        <input type="checkbox" checked={agree} onChange={(e) => setAgree(e.target.checked)} style={{ width: 22, height: 22, accentColor: "#5A3E2B" }} /> I understand how this works
+        <input type="checkbox" checked={agree} onChange={(e) => setAgree(e.target.checked)} style={{ width: 22, height: 22, accentColor: "#2B211A" }} /> I understand how this works
       </label>
       <ErrorText msg={err} />
       <button
