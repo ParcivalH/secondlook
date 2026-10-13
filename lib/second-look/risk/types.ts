@@ -19,6 +19,10 @@ export interface TransferDraft {
   label?: string;
   /** True when the address was pasted rather than picked from contacts. */
   pasted?: boolean;
+  /** Behaviour on the send screen, measured on the device: how often the amount was changed. */
+  amountEdits?: number;
+  /** Behaviour on the send screen: time from opening it to pressing Review, in ms. */
+  dwellMs?: number;
 }
 
 /** Everything the risk engine is allowed to know. All of it is local or on-chain data; none of it comes from the AI. */
@@ -47,7 +51,11 @@ export type SignalCode =
   | "LARGE_VS_USUAL"
   | "LARGE_SHARE"
   | "PASTED_ADDRESS"
-  | "LATE_NIGHT";
+  | "LATE_NIGHT"
+  | "ESCALATING"
+  | "DORMANT_THEN_LARGE"
+  | "AMOUNT_EDITS"
+  | "LONG_PAUSE";
 
 export interface Signal {
   code: SignalCode;
@@ -55,6 +63,8 @@ export interface Signal {
   text: string;
   /** Hard signals are enforced on-chain (the daily allowance), not just by the app. */
   hard?: boolean;
+  /** A scam signal: it always turns on Lumi's full check, even for a trusted contact. */
+  scam?: boolean;
 }
 
 export interface Assessment {
@@ -67,4 +77,9 @@ export interface Assessment {
   needsGuardian: boolean;
   /** Yellow sends now and gives the guardian a heads-up. */
   notifyGuardian: boolean;
+  /**
+   * A trusted contact, above the limit, with no scam signal: the guardian still confirms,
+   * but Lumi skips the questions.
+   */
+  lightPath: boolean;
 }

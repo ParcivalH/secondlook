@@ -30,8 +30,10 @@ const Draft = z.object({
   txHash: z.string().optional(),
   route: z.enum(["allowance", "guardian"]).optional(),
   token: z.string().refine((t) => !!findToken(t), "Unknown token").optional(),
+  amountEdits: z.number().int().min(0).max(1000).optional(),
+  dwellMs: z.number().min(0).max(86_400_000).optional(),
 });
-const Turn = z.object({ text: z.string().max(2000).optional(), quick: z.union([z.literal(0), z.literal(1)]).optional() });
+const Turn = z.object({ text: z.string().max(2000).optional(), option: z.number().int().min(0).max(9).optional() });
 const Decision = z.object({ decision: z.enum(["approve", "reject"]), note: z.string().max(280).optional() });
 const Rule = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("limit"), from: z.number().min(0), to: z.number().min(0).max(MAX_LIMIT, "The daily limit can be at most 5,000") }),
@@ -157,6 +159,8 @@ async function handle(req: Request, ctx: Ctx): Promise<Response> {
   if (route === "POST /transfers") return ok(store.startTransfer(Draft.parse(body)), 201);
   if (id && route === `POST /requests/${id}/turn`) return ok(await store.answer(id, Turn.parse(body)));
   if (id && route === `POST /requests/${id}/cancel`) return ok(store.cancel(id));
+  if (id && route === `POST /requests/${id}/check-first`) return ok(store.checkFirst(id));
+  if (id && route === `POST /requests/${id}/call`) return ok(store.callGuardian(id));
 
   // Demo mode: hand the request to Mia without a real Safe transaction.
   if (id && route === `POST /requests/${id}/submit`) return ok(store.submit(id));
