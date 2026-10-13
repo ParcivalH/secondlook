@@ -3,9 +3,9 @@
 import { GROUP_LABELS, type RiskScore, type ScoreGroup } from "@/lib/second-look/risk";
 
 const BAND = {
-  low: { label: "Low risk", fill: "#6B8556", tint: "#E4EAD9" },
-  elevated: { label: "Unusual", fill: "#D4A04A", tint: "#F4E6C8" },
-  high: { label: "High risk", fill: "#9E3A2B", tint: "#F1DED8" },
+  low: { label: "Low risk", fill: "#6F9479", tint: "#E7EDE3" },
+  elevated: { label: "Unusual", fill: "#E9B86A", tint: "#F6E7CC" },
+  high: { label: "High risk", fill: "#C8735A", tint: "#F4DED6" },
 } as const;
 const CAPS: Record<ScoreGroup, number> = { transfer: 30, recipient: 40, conversation: 60 };
 
@@ -28,10 +28,10 @@ function Gauge({ score, band }: { score: number; band: RiskScore["band"] }) {
       <path d={arc(40.5, 69.5, 80)} stroke={BAND.elevated.tint} strokeWidth="14" fill="none" />
       <path d={arc(70.5, 100, 80)} stroke={BAND.high.tint} strokeWidth="14" fill="none" />
       {score > 0 && <path d={arc(0, Math.max(1, score), 80)} stroke={b.fill} strokeWidth="14" fill="none" strokeLinecap="round" />}
-      <text x="100" y="92" textAnchor="middle" fontFamily="var(--display)" fontWeight="600" fontSize="46" fill="#2B211A">
+      <text x="100" y="92" textAnchor="middle" fontFamily="var(--display)" fontWeight="400" fontSize="50" fill="#315449">
         {score}
       </text>
-      <text x="100" y="112" textAnchor="middle" fontSize="13" fontWeight="500" fill="#786A5C">
+      <text x="100" y="112" textAnchor="middle" fontSize="13" fontWeight="500" fill="#5C6B62">
         out of 100
       </text>
     </svg>
@@ -46,9 +46,9 @@ function Trail({ trail }: { trail: number[] }) {
   return (
     <div className="trail">
       <svg viewBox={`-4 -4 ${w + 8} ${h + 8}`} width={w + 8} height={h + 8} aria-hidden="true">
-        <polyline points={pts} fill="none" stroke="#2B211A" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+        <polyline points={pts} fill="none" stroke="#315449" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
         {trail.map((v, i) => (
-          <circle key={i} cx={(i / (trail.length - 1)) * w} cy={h - (v / 100) * h} r={i === trail.length - 1 ? 4 : 2.5} fill="#2B211A" />
+          <circle key={i} cx={(i / (trail.length - 1)) * w} cy={h - (v / 100) * h} r={i === trail.length - 1 ? 4 : 2.5} fill="#315449" />
         ))}
       </svg>
       <span className="meta">
