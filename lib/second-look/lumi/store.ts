@@ -11,7 +11,7 @@ import {
   type RuleChange,
   type TransferDraft,
 } from "../risk";
-import { fitsDecimals, fmtAmount, symOf, usd, type Sym } from "../assets";
+import { balanceOf, fitsDecimals, fmtAmount, symOf, totalUsd, usd, type Sym } from "../assets";
 import type { Lumi, Names } from "./lumi";
 import type { GuardRequest, LedgerMessage, PendingSafeTx, TransferRequest } from "./types";
 
@@ -27,6 +27,8 @@ export interface AccountState {
   balance: number;
   /** ETH in the account. */
   ethBalance?: number;
+  /** Other tokens (EURC, LINK, …) by symbol. */
+  balances?: Record<string, number>;
   allowlist: Contact[];
   /** `amount` is the USD value (what the risk rules and the daily limit count); `tokenAmount` + `token` is what moved. */
   history: (PastTransfer & { label: string; txHash?: string; requestId?: string; token?: Sym; tokenAmount?: number })[];
@@ -79,6 +81,7 @@ export function liveAccount(): AccountState {
     dailyLimit: Number(process.env.DAILY_LIMIT_USDC ?? 200),
     balance: 0,
     ethBalance: 0,
+    balances: {},
     allowlist: [],
     history: [],
     flagged: ["0xdead00000000000000000000000000000000beef"],
@@ -122,10 +125,11 @@ export class Store {
   }
 
   /** Live mode keeps the balance and the daily limit in step with the chain. */
-  syncChain(c: { balance?: number; ethBalance?: number; dailyLimit?: number }) {
+  syncChain(c: { balance?: number; ethBalance?: number; balances?: Record<string, number>; dailyLimit?: number }) {
+    if (c.balances) this.state.balances = { ...this.state.balances, ...c.balances };
     if (c.balance !== undefined) this.state.balance = c.balance;
     if (c.ethBalance !== undefined) this.state.ethBalance = c.ethBalance;
-    if (c.dailyLimit !== undefined && c.dailyLimit > 0) this.state.dailyLimit = c.dailyLimit;
+    if (c.dailyLimit !== undefined && c.dailyLimit >= 0) this.state.dailyLimit = c.dailyLimit;
   }
 
   snapshot() {
@@ -154,7 +158,7 @@ export class Store {
   context(): AccountContext {
     const s = this.state;
     // Risk rules see the whole account in USD
-    return { dailyLimit: s.dailyLimit, balance: s.balance + usd(s.ethBalance ?? 0, "ETH"), allowlist: s.allowlist, history: s.history, flagged: s.flagged, now: this.now() };
+    return { dailyLimit: s.dailyLimit, balance: totalUsd(s), allowlist: s.allowlist, history: s.history, flagged: s.flagged, now: this.now() };
   }
 
   openRequest(): GuardRequest | undefined {
@@ -200,7 +204,7 @@ export class Store {
     if (!(draft.amount > 0)) throw new HttpError(400, "Enter an amount above 0");
     const token = symOf(draft);
     if (!fitsDecimals(draft.amount, token)) throw new HttpError(400, `Too many decimals for ${token}`);
-    const balance = token === "ETH" ? (this.state.ethBalance ?? 0) : this.state.balance;
+    const balance = balanceOf(this.state, token);
     // Live mode reads the balance from the chain; if that read failed (0), let the Safe itself refuse.
     if ((this.mode === "demo" || balance > 0) && draft.amount > balance) throw new HttpError(400, `That's more than your ${token} balance`);
     const label = (draft.label ?? "").trim() || "New contact";
@@ -356,8 +360,9 @@ export class Store {
 
   private recordTransfer(addr: string, label: string, token: Sym, amount: number, txHash?: string, requestId?: string) {
     this.state.history.unshift({ addr, label, amount: usd(amount, token), token, tokenAmount: amount, ts: this.now(), txHash, requestId });
-    if (token === "ETH") this.state.ethBalance = (this.state.ethBalance ?? 0) - amount;
-    else this.state.balance -= amount;
+    if (token === "USDC") this.state.balance -= amount;
+    else if (token === "ETH") this.state.ethBalance = (this.state.ethBalance ?? 0) - amount;
+    else this.state.balances = { ...this.state.balances, [token]: balanceOf(this.state, token) - amount };
   }
 }
 

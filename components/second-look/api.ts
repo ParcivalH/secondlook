@@ -86,6 +86,7 @@ export interface State {
     dailyLimit: number;
     balance: number;
     ethBalance?: number;
+    balances?: Record<string, number>;
     allowlist: Contact[];
     /** amount = USD value; tokenAmount + token = what moved */
     history: { addr: string; label: string; amount: number; ts: number; txHash?: string; token?: Sym; tokenAmount?: number }[];

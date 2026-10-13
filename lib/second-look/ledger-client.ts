@@ -15,6 +15,7 @@ import { decodeFunctionData, erc20Abi, formatUnits, getAddress } from "viem";
 import { CHAIN_ID } from "@/lib/config";
 import { safeTxHashes, type SafeTxFields } from "@/lib/safeHash";
 import { USDC, ALLOWANCE_MODULE, allowanceAbi } from "./chain";
+import { TOKENS } from "@/lib/tokens";
 
 export const GUARDIAN_PATH = "44'/60'/0'/0/0";
 
@@ -161,9 +162,10 @@ export function describeSafeTx(tx: SafeTxFields): string {
   if (Number(tx.operation) === 1) return "Setup batch: turn on the daily allowance";
   if (data === "0x" && BigInt(tx.value) > BigInt(0)) return `ETH transfer of ${formatUnits(BigInt(tx.value), 18)} to ${tx.to}`;
   try {
-    if (getAddress(tx.to) === getAddress(USDC.address!)) {
+    const token = TOKENS.find((t) => t.address && getAddress(t.address) === getAddress(tx.to));
+    if (token) {
       const d = decodeFunctionData({ abi: erc20Abi, data });
-      if (d.functionName === "transfer") return `USDC transfer of ${formatUnits(d.args[1], USDC.decimals)} to ${d.args[0]}`;
+      if (d.functionName === "transfer") return `${token.symbol} transfer of ${formatUnits(d.args[1], token.decimals)} to ${d.args[0]}`;
     }
     if (getAddress(tx.to) === getAddress(ALLOWANCE_MODULE)) {
       const d = decodeFunctionData({ abi: allowanceAbi, data });

@@ -2,6 +2,7 @@ import { promises as fs } from "fs";
 import path from "path";
 import { createPublicClient, erc20Abi, formatEther, formatUnits, getAddress, http } from "viem";
 import { sepolia } from "viem/chains";
+import { TOKENS } from "@/lib/tokens";
 import { ALLOWANCE_MODULE, USDC, allowanceAbi, safeModuleAbi } from "./chain";
 import { liveAccount } from "./account";
 import { Lumi } from "./lumi/lumi";
@@ -84,6 +85,25 @@ export async function safeEthBalance(): Promise<number | undefined> {
   } catch {
     return undefined;
   }
+}
+
+/** The Safe's other ERC-20 balances (any token added to lib/tokens.ts besides USDC) (EURC, LINK, …), by symbol. One failed read just leaves that token out. */
+export async function safeTokenBalances(): Promise<Record<string, number> | undefined> {
+  const account = liveAccount();
+  if (!account) return undefined;
+  const c = client();
+  const out: Record<string, number> = {};
+  await Promise.all(
+    TOKENS.filter((t) => t.address && t.symbol !== "USDC").map(async (t) => {
+      try {
+        const raw = await c.readContract({ address: t.address!, abi: erc20Abi, functionName: "balanceOf", args: [account.safeAddress] });
+        out[t.symbol] = Number(formatUnits(raw, t.decimals));
+      } catch {
+        /* skip */
+      }
+    }),
+  );
+  return out;
 }
 
 export interface AllowanceInfo {

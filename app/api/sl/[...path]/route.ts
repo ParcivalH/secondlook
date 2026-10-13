@@ -5,6 +5,7 @@ import { getAddress, isAddress, recoverAddress } from "viem";
 import { z } from "zod/v4";
 import { CHAIN_ID } from "@/lib/config";
 import { buildTransfer } from "@/lib/buildTransfer";
+import { findToken } from "@/lib/tokens";
 import { safeTxHashes } from "@/lib/safeHash";
 import { checkGuardedSafe } from "@/lib/safeCheck";
 import { executeOnLedger, signMessageOnLedger } from "@/lib/guardian";
@@ -13,10 +14,12 @@ import { assess, timeline } from "@/lib/second-look/risk";
 import { amountString, symOf, tokenOf, usd } from "@/lib/second-look/assets";
 import { clearAccount, getAccount, liveAccount, requireLive, saveAccount } from "@/lib/second-look/account";
 import { HttpError, type Store } from "@/lib/second-look/lumi/store";
-import { aiInfo, getStore, ownerAllowance, renameAccount, resetHolder, safeEthBalance, safeUsdcBalance, save } from "@/lib/second-look/server";
+import { aiInfo, getStore, ownerAllowance, renameAccount, resetHolder, safeEthBalance, safeTokenBalances, safeUsdcBalance, save } from "@/lib/second-look/server";
 
 const apiKit = () => new SafeApiKit({ chainId: BigInt(CHAIN_ID), apiKey: process.env.SAFE_API_KEY });
 
+/** Daily limit range the owner can pick (USD value). */
+const MAX_LIMIT = 5000;
 const addr = z.string().refine((a) => isAddress(a), "That address doesn't look right");
 const Draft = z.object({
   to: addr,
@@ -26,15 +29,15 @@ const Draft = z.object({
   owner: addr.optional(),
   txHash: z.string().optional(),
   route: z.enum(["allowance", "guardian"]).optional(),
-  token: z.enum(["USDC", "ETH"]).optional(),
+  token: z.string().refine((t) => !!findToken(t), "Unknown token").optional(),
 });
 const Turn = z.object({ text: z.string().max(2000).optional(), quick: z.union([z.literal(0), z.literal(1)]).optional() });
 const Decision = z.object({ decision: z.enum(["approve", "reject"]), note: z.string().max(280).optional() });
 const Rule = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("limit"), from: z.number().positive(), to: z.number().min(10) }),
+  z.object({ kind: z.literal("limit"), from: z.number().min(0), to: z.number().min(0).max(MAX_LIMIT, "The daily limit can be at most 5,000") }),
   z.object({ kind: z.literal("allow"), addr, label: z.string().min(1).max(60) }),
   z.object({ kind: z.literal("removeGuardian") }),
-  z.object({ kind: z.literal("enableProtection"), limit: z.number().min(10) }),
+  z.object({ kind: z.literal("enableProtection"), limit: z.number().min(0).max(MAX_LIMIT, "The daily limit can be at most 5,000") }),
 ]);
 const SafeTxData = z.object({
   to: addr,
@@ -59,7 +62,7 @@ async function syncChain(owner?: string) {
   if (!liveAccount()) return { enabled: false, limit: 0, spent: 0, remaining: 0 };
   const allowance = await ownerAllowance(owner);
   if (Date.now() - lastSync > 10_000 || owner) {
-    store.syncChain({ balance: await safeUsdcBalance(), ethBalance: await safeEthBalance(), dailyLimit: allowance.enabled ? allowance.limit : undefined });
+    store.syncChain({ balance: await safeUsdcBalance(), ethBalance: await safeEthBalance(), balances: await safeTokenBalances(), dailyLimit: allowance.enabled ? allowance.limit : undefined });
     lastSync = Date.now();
   }
   return allowance;
@@ -79,7 +82,7 @@ async function view() {
     now: store.now(),
     names: { owner: acct?.ownerName ?? "Dad", guardian: acct?.guardianName ?? "Mia" },
     ai: aiInfo(),
-    account: { guardianActive: s.guardianActive, dailyLimit: s.dailyLimit, balance: s.balance, ethBalance: s.ethBalance ?? 0, allowlist: s.allowlist, history: s.history.slice(0, 20) },
+    account: { guardianActive: s.guardianActive, dailyLimit: s.dailyLimit, balance: s.balance, ethBalance: s.ethBalance ?? 0, balances: s.balances ?? {}, allowlist: s.allowlist, history: s.history.slice(0, 20) },
     remainingToday: assess({ to: "0x0000000000000000000000000000000000000000", amount: 0 }, store.context()).remainingToday,
     open: open ? { ...open, timeline: timeline(open.createdAt, store.now()) } : null,
     latest: s.requests[0] ?? null,

@@ -6,7 +6,7 @@ import { ago, api, hoursLeft, isOpen, liveOf, money, short, type AssessResult, t
 import { executeApproved, ownerAddress, sendWithinAllowance, signAndPropose } from "@/lib/second-look/owner-client";
 import { ErrorText, Lit, Lumi, Pill, useApp } from "./shared";
 import { etherscanTxUrl } from "@/lib/config";
-import { SYMBOLS, fitsDecimals, fmtAmount, symOf, tokenOf, usd, type Sym } from "@/lib/second-look/assets";
+import { COMING_SOON, SYMBOLS, balanceOf, fitsDecimals, fmtAmount, symOf, tokenOf, usd, type Sym } from "@/lib/second-look/assets";
 
 type Screen = "home" | "send" | "review" | "chat" | "waiting" | "result" | "settings";
 interface Sent {
@@ -80,34 +80,38 @@ function Head({ back, go }: { back?: Screen; go?: (s: Screen) => void }) {
   );
 }
 
+/** Daily limit range (USD value). The server enforces the same bounds. */
+const LIMIT_MIN = 0;
+const LIMIT_MAX = 5000;
+
 export function LimitControl({ value, onChange }: { value: number; onChange: (n: number) => void }) {
-  const pct = Math.min(100, Math.max(0, ((value - 50) / (2000 - 50)) * 100));
+  const pct = Math.min(100, Math.max(0, ((value - LIMIT_MIN) / (LIMIT_MAX - LIMIT_MIN)) * 100));
   return (
     <div className="limit">
       <div className="limit-top">
         <label className="sr" htmlFor="limitAmt">
           Daily limit in USDC
         </label>
-        <input id="limitAmt" className="limit-amt" inputMode="numeric" value={value} onChange={(e) => onChange(Number(e.target.value.replace(/[^0-9]/g, "")) || 0)} />
+        <input id="limitAmt" className="limit-amt" inputMode="numeric" value={value} onChange={(e) => onChange(Math.min(LIMIT_MAX, Number(e.target.value.replace(/[^0-9]/g, "")) || 0))} />
         <span className="limit-unit">USDC a day</span>
       </div>
       <input
         className="slider"
         type="range"
-        min={50}
-        max={2000}
-        step={10}
-        value={Math.min(2000, Math.max(50, value))}
+        min={LIMIT_MIN}
+        max={LIMIT_MAX}
+        step={50}
+        value={Math.min(LIMIT_MAX, Math.max(LIMIT_MIN, value))}
         style={{ ["--pct" as string]: `${pct}%` }}
         aria-label="Daily limit"
         onChange={(e) => onChange(Number(e.target.value))}
       />
       <div className="ticks">
-        <span>50</span>
-        <span>2,000</span>
+        <span>{LIMIT_MIN.toLocaleString("en-US")}</span>
+        <span>{LIMIT_MAX.toLocaleString("en-US")}</span>
       </div>
       <div className="row">
-        {[100, 200, 500].map((v) => (
+        {[200, 1000, 5000].map((v) => (
           <button key={v} className="chip" type="button" aria-pressed={value === v} onClick={() => onChange(v)}>
             {v} {v === 200 ? "· typical" : ""}
           </button>
@@ -192,7 +196,7 @@ function Setup() {
         className="btn primary"
         type="button"
         onClick={async () => {
-          if (limit < 10) return setErr("Enter a daily limit of at least 10 USDC.");
+          if (limit < LIMIT_MIN || limit > LIMIT_MAX) return setErr(`Choose a daily limit between ${LIMIT_MIN} and ${LIMIT_MAX.toLocaleString("en-US")} USDC.`);
           if (!agree) return setErr("Tick the box to continue.");
           try {
             await api.rule({ kind: "enableProtection", limit });
@@ -212,7 +216,7 @@ function Home({ go }: { go: (s: Screen) => void }) {
   const { state } = useApp();
   const { account, names, open } = state;
   const spent = Math.max(0, account.dailyLimit - state.remainingToday);
-  const pct = Math.min(100, (spent / account.dailyLimit) * 100);
+  const pct = account.dailyLimit > 0 ? Math.min(100, (spent / account.dailyLimit) * 100) : 100;
   return (
     <div className="stack fade">
       <Head />
@@ -221,7 +225,11 @@ function Home({ go }: { go: (s: Screen) => void }) {
         <div className="big">
           {money(account.balance)} <span>USDC</span>
         </div>
-        <span className="meta">{fmtAmount(account.ethBalance ?? 0, "ETH")}</span>
+        <span className="meta">
+          {SYMBOLS.filter((t) => t !== "USDC" && (t === "ETH" || balanceOf(account, t) > 0))
+            .map((t) => fmtAmount(balanceOf(account, t), t))
+            .join(" · ")}
+        </span>
       </div>
       <div className="card">
         <div className="row" style={{ justifyContent: "space-between" }}>
@@ -279,7 +287,7 @@ function Send({ draft, setDraft, go }: { draft: Draft; setDraft: (d: Draft) => v
   const [err, setErr] = useState<string | null>(null);
   const set = (p: Partial<Draft>) => setDraft({ ...draft, ...p });
   const token = symOf(draft);
-  const balance = token === "ETH" ? (state.account.ethBalance ?? 0) : state.account.balance;
+  const balance = balanceOf(state.account, token);
   return (
     <div className="stack fade">
       <Head back="home" go={go} />
@@ -309,16 +317,23 @@ function Send({ draft, setDraft, go }: { draft: Draft; setDraft: (d: Draft) => v
           </label>
         </>
       )}
-      <span className="field" style={{ margin: 0 }}>
+      <label className="field">
         Token
-      </span>
-      <div className="row">
-        {SYMBOLS.map((t) => (
-          <button key={t} className="chip" type="button" aria-pressed={token === t} onClick={() => set({ token: t })}>
-            {t} · {fmtAmount(t === "ETH" ? (state.account.ethBalance ?? 0) : state.account.balance, t)}
-          </button>
-        ))}
-      </div>
+        <select value={token} onChange={(e) => set({ token: e.target.value })}>
+          {SYMBOLS.map((t) => (
+            <option key={t} value={t}>
+              {t} · {tokenOf(t).name} · balance {fmtAmount(balanceOf(state.account, t), t)}
+            </option>
+          ))}
+          <optgroup label="Coming soon">
+            {COMING_SOON.map((t) => (
+              <option key={t.symbol} value={t.symbol} disabled>
+                {t.symbol} · {t.name}
+              </option>
+            ))}
+          </optgroup>
+        </select>
+      </label>
       <label className="field">
         Amount ({token})
         <input type="text" inputMode="decimal" placeholder="0" value={draft.amount} onChange={(e) => set({ amount: e.target.value })} />
@@ -428,7 +443,7 @@ function Review({ draft, go, onSent }: { draft: Draft; go: (s: Screen) => void; 
         <span className="big">
           {fmtAmount(amount, token).split(" ")[0]} <span>{token}</span>
         </span>
-        {token === "ETH" && <span className="meta">≈ {money(usd(amount, token))} USD for the daily limit and risk check</span>}
+        {token !== "USDC" && <span className="meta">≈ {money(usd(amount, token))} USD for the daily limit and risk check</span>}
         <strong style={{ fontSize: 15 }}>
           To {draft.label || "New contact"}
           {known ? "" : " · new address"}
@@ -781,7 +796,7 @@ function Settings({ go }: { go: (s: Screen) => void }) {
           Now {money(cur)} USDC a day. Raising it needs {g}. Lowering it works right away.
         </span>
         <LimitControl value={limit} onChange={setLimit} />
-        <button className="btn sm primary" type="button" disabled={limit === cur || pending || limit < 10} onClick={() => run(() => api.rule({ kind: "limit", from: cur, to: limit }))}>
+        <button className="btn sm primary" type="button" disabled={limit === cur || pending || limit < LIMIT_MIN || limit > LIMIT_MAX} onClick={() => run(() => api.rule({ kind: "limit", from: cur, to: limit }))}>
           {limit === cur ? "This is your current limit" : limit < cur ? `Lower to ${money(limit)} USDC now` : `Ask ${g} to raise it to ${money(limit)} USDC`}
         </button>
       </div>
