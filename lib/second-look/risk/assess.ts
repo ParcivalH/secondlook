@@ -14,6 +14,14 @@ export const RULES = {
   lateNightBeforeHour: 6,
   /** Used when there is no history yet. */
   defaultMedian: 50,
+  /** Prior transfers to the same address, each bigger than the last, that make this one escalation. */
+  escalatingPriorCount: 2,
+  /** No transfers for this long, then a large one. */
+  dormantDays: 21,
+  /** Changing the amount this many times on the send screen. */
+  amountEdits: 3,
+  /** Staying on the send screen this long before pressing Review. */
+  longPauseMs: 3 * 60_000,
 } as const;
 
 const fmt = (n: number) => n.toLocaleString("en-US", { maximumFractionDigits: 2 });
@@ -64,6 +72,15 @@ export function assess(draft: TransferDraft, ctx: AccountContext): Assessment {
   const largeShare = ctx.balance > 0 && amt > ctx.balance * RULES.largeShareOfBalance;
   const fresh = isNewAddress && ctx.recipientAgeDays !== undefined && ctx.recipientAgeDays < RULES.freshAddressDays;
   const late = hour < RULES.lateNightBeforeHour;
+  const priorSorted = [...prior].sort((a, b) => a.ts - b.ts).slice(-RULES.escalatingPriorCount);
+  const escalating =
+    priorSorted.length >= RULES.escalatingPriorCount &&
+    priorSorted.every((h, i) => i === 0 || h.amount > priorSorted[i - 1]!.amount) &&
+    amt > priorSorted.at(-1)!.amount;
+  const lastTs = ctx.history.reduce((m, h) => Math.max(m, h.ts), 0);
+  const dormant = ctx.history.length > 0 && ctx.now - lastTs >= RULES.dormantDays * DAY && largeVsUsual;
+  const edits = (draft.amountEdits ?? 0) >= RULES.amountEdits;
+  const pause = (draft.dwellMs ?? 0) >= RULES.longPauseMs;
 
   if (overLimit)
     signals.push({
@@ -71,13 +88,17 @@ export function assess(draft: TransferDraft, ctx: AccountContext): Assessment {
       hard: true,
       text: `Above what's left of today's limit (${fmt(remainingToday)} of ${fmt(ctx.dailyLimit)} USDC). The account itself enforces this.`,
     });
-  if (flagged) signals.push({ code: "FLAGGED_ADDRESS", text: "This address is on a list of reported scam addresses" });
+  if (flagged) signals.push({ code: "FLAGGED_ADDRESS", scam: true, text: "This address is on a list of reported scam addresses" });
   if (isNewAddress && !prior.length) signals.push({ code: "NEW_ADDRESS", text: "An address you've never sent to before" });
   if (fresh) signals.push({ code: "FRESH_ADDRESS", text: `This address was created ${ctx.recipientAgeDays} days ago` });
   if (smallThenLarge)
-    signals.push({ code: "SMALL_THEN_LARGE", text: "You sent a small amount here before, and now a much larger one" });
+    signals.push({ code: "SMALL_THEN_LARGE", scam: true, text: "You sent a small amount here before, and now a much larger one" });
+  if (escalating && !smallThenLarge)
+    signals.push({ code: "ESCALATING", scam: true, text: "Each transfer to this address has been bigger than the last" });
   if (burst)
-    signals.push({ code: "BURST_TO_NEW", text: `This would be transfer number ${priorDay.length + 1} to this new address today` });
+    signals.push({ code: "BURST_TO_NEW", scam: true, text: `This would be transfer number ${priorDay.length + 1} to this new address today` });
+  if (dormant)
+    signals.push({ code: "DORMANT_THEN_LARGE", scam: true, text: `No transfers for ${Math.floor((ctx.now - lastTs) / DAY)} days, then a large one` });
   if (largeVsUsual)
     signals.push({ code: "LARGE_VS_USUAL", text: `About ${Math.round(amt / median)}× your usual transfer` });
   if (largeShare)
@@ -85,10 +106,15 @@ export function assess(draft: TransferDraft, ctx: AccountContext): Assessment {
   if (draft.pasted && isNewAddress)
     signals.push({ code: "PASTED_ADDRESS", text: "The address was pasted in, not picked from your contacts" });
   if (late) signals.push({ code: "LATE_NIGHT", text: "Sent late at night" });
+  // Behaviour on the send screen. These add to the score and turn on the full check; on their own they never block or send.
+  if (edits) signals.push({ code: "AMOUNT_EDITS", scam: true, text: `The amount was changed ${draft.amountEdits} times before sending` });
+  if (pause) signals.push({ code: "LONG_PAUSE", scam: true, text: `${Math.round((draft.dwellMs ?? 0) / 60_000)} minutes on the send screen before pressing Review` });
 
   let tier: Tier = "green";
-  if (overLimit || flagged || smallThenLarge || burst || (isNewAddress && (largeVsUsual || largeShare))) tier = "red";
+  if (overLimit || flagged || smallThenLarge || burst || escalating || dormant || (isNewAddress && (largeVsUsual || largeShare))) tier = "red";
   else if (isNewAddress) tier = "yellow";
+  // Trusted contacts never lift the limit, but a transfer that is only big, with no scam signal, skips the questions.
+  const lightPath = tier === "red" && !isNewAddress && !signals.some((s) => s.scam);
 
   return {
     tier,
@@ -98,6 +124,7 @@ export function assess(draft: TransferDraft, ctx: AccountContext): Assessment {
     isNewAddress,
     needsGuardian: tier === "red",
     notifyGuardian: tier === "yellow",
+    lightPath,
   };
 }
 

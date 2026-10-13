@@ -1,19 +1,16 @@
 import { z } from "zod/v4";
+import { FACT_IDS, PURPOSES, type QuestionId } from "../risk/conversation";
 
-const flag = z.enum(["yes", "no", "unclear"]);
+const fact = z.enum(["yes", "no", "unsure", "unclear"]);
+const QUESTION_IDS: [QuestionId, ...QuestionId[]] = ["inv_source", "inv_withdrawn", "inv_amount", "sa_who", "remote", "hurry", "help_who", "help_check", "addr_source"];
 
 /** What Claude must return for one conversation turn. Validated before anything is used. */
 export const TurnOutput = z.object({
-  flags: z.object({
-    remote_guidance: flag,
-    met_online: flag,
-    never_met: flag,
-    unlock_fee: flag,
-    secrecy_urgency: flag,
-  }),
-  pattern: z.enum(["investment", "impersonation", "none", "unclear"]),
+  purpose: z.enum([...PURPOSES, "unclear"]),
+  facts: z.object(Object.fromEntries(FACT_IDS.map((id) => [id, fact])) as Record<(typeof FACT_IDS)[number], typeof fact>),
+  pattern: z.enum(["investment", "safe_account", "emergency", "none", "unclear"]),
   ack: z.string(),
-  asking: z.enum(["remote_guidance", "met_online", "never_met", "unlock_fee", "secrecy_urgency", "none"]),
+  asking: z.enum([...QUESTION_IDS, "purpose", "none"]),
   question: z.string(),
   owner_wants_to_stop: z.boolean(),
 });

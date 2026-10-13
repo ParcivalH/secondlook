@@ -77,7 +77,22 @@ function Inbox({ go }: { go: (s: Screen) => void }) {
             <span className="d" />
             Needs your decision
           </span>
-          <strong className="sub">{open.kind === "transfer" ? `${names.owner} wants to send ${fmtAmount(open.amount, symOf(open))} to a new address` : open.title}</strong>
+          <strong className="sub">
+            {open.kind === "transfer" ? `${names.owner} wants to send ${fmtAmount(open.amount, symOf(open))} to ${open.label}${open.assessment.isNewAddress ? " (a new address)" : ""}` : open.title}
+          </strong>
+          {open.kind === "transfer" && (
+            <span className="li">
+              {open.conversation.callRequested
+                ? `${names.owner} would like you to call him.`
+                : open.status === "chat"
+                  ? open.conversation.checkingFirst
+                    ? `${names.owner} chose to check first. Nothing has moved.`
+                    : `${names.owner} is talking with Lumi now. You can read along.`
+                  : open.conversation.light
+                    ? "A trusted contact, only above his daily limit."
+                    : `${names.owner} has sent it to you to confirm.`}
+            </span>
+          )}
           <span className="meta">
             Requested {ago(open.createdAt, state.now)} · expires in {hoursLeft(open, state.now)}h · reminder {Math.max(1, open.remindersSent ?? 1)} of 3 sent
           </span>
@@ -146,8 +161,14 @@ function BriefScreen({ req, note, setNote, go }: { req: Req; note: string; setNo
       ‹ Inbox
     </button>
   );
+  const notYet = req.status === "chat";
   const actions = (
     <>
+      {notYet && (
+        <p className="meta" style={{ fontSize: 15 }}>
+          Approving opens once {owner} sends this to you. You can reject it anytime.
+        </p>
+      )}
       <label className="field">
         Leave {owner} a note (optional)
         <input type="text" value={note} onChange={(e) => setNote(e.target.value)} maxLength={280} />
@@ -159,7 +180,7 @@ function BriefScreen({ req, note, setNote, go }: { req: Req; note: string; setNo
         <button className="btn reject" type="button" onClick={() => go({ name: "ledger", action: "reject" })}>
           Reject
         </button>
-        <button className="btn" type="button" onClick={() => go({ name: "ledger", action: "approve" })}>
+        <button className="btn" type="button" disabled={notYet} onClick={() => go({ name: "ledger", action: "approve" })}>
           Approve on Ledger
         </button>
       </div>
@@ -205,11 +226,45 @@ function BriefScreen({ req, note, setNote, go }: { req: Req; note: string; setNo
           </h2>
           <span className="meta">
             {short(req.to)}
-            {req.assessment.isNewAddress ? " · new address" : ""}
+            {req.assessment.isNewAddress ? " · new address" : " · trusted contact"}
           </span>
+          {brief?.purpose && (
+            <span className="pill" style={{ background: "var(--card-2)", marginTop: 6 }}>
+              For: {brief.purpose}
+            </span>
+          )}
         </div>
+        {brief?.light && (
+          <div className="box tint-grn">
+            <span className="li" style={{ fontSize: 16 }}>
+              <b>{req.label} is a trusted contact.</b> {`This is only above ${owner}'s daily limit, with no scam signal, so Lumi didn't ask him questions. Trusted contacts never lift the limit, so it still needs you.`}
+            </span>
+          </div>
+        )}
+        {(brief?.callRequested || brief?.checkingFirst) && (
+          <div className="box tint-yel">
+            {brief.callRequested && <span className="li" style={{ fontSize: 16 }}><b>{owner} would like you to call him.</b> The transfer is on hold.</span>}
+            {brief.checkingFirst && <span className="li" style={{ fontSize: 16 }}>{owner} chose to check first{brief.selfCheck ? ` (Lumi suggested: ${brief.selfCheck.replace(/\.$/, "")})` : ""}. Nothing has moved.</span>}
+          </div>
+        )}
         {brief?.source === "ai" && <p style={{ textAlign: "center", fontWeight: 700 }}>{brief.headline}</p>}
         {brief && <RiskScoreCard score={brief.score} trail={brief.scoreTrail} live={!req.conversation.done} />}
+        {brief?.matches && (
+          <div className="card">
+            <strong>
+              Matches {brief.matches.steps.filter((x) => x.seen).length} of {brief.matches.steps.length} steps of a known {brief.matches.name}
+            </strong>
+            <div className="steps-seen">
+              {brief.matches.steps.map((x) => (
+                <span key={x.label} className={`s ${x.seen ? "on" : "off"}`}>
+                  <i aria-hidden="true">{x.seen ? "✓" : ""}</i>
+                  {x.label}
+                  <span className="sr">{x.seen ? " (seen)" : " (not seen)"}</span>
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
         <div className="grid2">
           <div className="card">
             <strong>The details</strong>

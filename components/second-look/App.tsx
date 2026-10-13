@@ -44,8 +44,8 @@ export function App() {
     <div className="wrap">
       <div className="bar">
         <div className="brand">
-          <img src="/icon.svg" alt="" style={{ width: 40, height: 40 }} />
-          <img src="/logo-inline.svg" alt="Second Look" style={{ height: 30, width: "auto" }} />
+          <img src="/icon.svg" alt="" style={{ width: 34, height: 34 }} />
+          <span className="wordmark">Second Look</span>
         </div>
         <nav className="tabs" aria-label="View">
           {(["both", "dad", "mia"] as View[]).map((v) => (
@@ -84,7 +84,7 @@ export function App() {
           <div className={`stage ${view === "both" ? "" : "single"}`}>
             {view !== "mia" && (
               <section className="col dad" aria-label={`${owner}'s phone`}>
-                <span className="label">{owner.toUpperCase()}&apos;S PHONE · OWNER</span>
+                <span className="label">{owner}&apos;s phone</span>
                 <div className="phone">
                   <Dad />
                 </div>
@@ -92,7 +92,7 @@ export function App() {
             )}
             {view !== "dad" && (
               <section className="col mia" aria-label={`${guardian}'s laptop`}>
-                <span className="label">{guardian.toUpperCase()}&apos;S LAPTOP · GUARDIAN WITH LEDGER</span>
+                <span className="label">{guardian}&apos;s laptop, with her Ledger</span>
                 <div className="laptop">
                   <Mia />
                 </div>

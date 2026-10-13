@@ -1,5 +1,5 @@
 import type { Sym } from "@/lib/second-look/assets";
-import type { Assessment, Contact, Flags, Pattern, RequestStatus, RiskScore, RuleChange } from "@/lib/second-look/risk";
+import type { Assessment, Attempts, Contact, Facts, Pattern, PatternStep, Purpose, QuestionId, RequestStatus, RiskScore, RuleChange } from "@/lib/second-look/risk";
 
 export interface ChatLine {
   from: "lumi" | "owner";
@@ -9,12 +9,18 @@ export interface ChatLine {
 
 export interface Conversation {
   lines: ChatLine[];
-  flags: Flags;
+  purpose: Purpose | null;
+  facts: Facts;
   pattern: Pattern;
+  asking: QuestionId | "purpose" | null;
   done: boolean;
   ownerWantsToStop: boolean;
-  attempts: Partial<Record<keyof Flags, number>>;
+  attempts: Attempts;
   source: "ai" | "script";
+  light?: boolean;
+  selfCheck?: string;
+  checkingFirst?: number;
+  callRequested?: number;
 }
 
 export interface SafeTxWire {
@@ -35,6 +41,7 @@ interface Base {
   safeTx?: SafeTxWire;
   ledger?: { signer: string; message: string; signature: string };
   remindersSent?: number;
+  expiredWhile?: "chat" | "pending";
   timeline?: { expired: boolean; expiresInMs: number; remindersDue: number };
 }
 export interface TransferReq extends Base {
@@ -65,6 +72,12 @@ export interface Brief {
   ourRead: string;
   suggestedAction: "call_first" | "call_if_unsure";
   source: "ai" | "script";
+  purpose: string | null;
+  matches: { name: string; steps: PatternStep[] } | null;
+  selfCheck?: string;
+  light: boolean;
+  checkingFirst?: number;
+  callRequested?: number;
 }
 
 export interface Feed {
@@ -130,10 +143,12 @@ export interface AssessResult {
 
 export const api = {
   state: () => call<State>("/state"),
-  assess: (d: { to: string; amount: number; token?: Sym; pasted?: boolean; owner?: string }) => call<AssessResult>("/assess", d),
-  transfer: (d: { to: string; amount: number; token?: Sym; label?: string; pasted?: boolean; txHash?: string; route?: "allowance" | "guardian" }) =>
+  assess: (d: { to: string; amount: number; token?: Sym; pasted?: boolean; owner?: string; amountEdits?: number; dwellMs?: number }) => call<AssessResult>("/assess", d),
+  transfer: (d: { to: string; amount: number; token?: Sym; label?: string; pasted?: boolean; txHash?: string; route?: "allowance" | "guardian"; amountEdits?: number; dwellMs?: number }) =>
     call<{ assessment: Assessment; request: Req | null }>("/transfers", d),
-  turn: (id: string, body: { text?: string; quick?: 0 | 1 }) => call<TransferReq>(`/requests/${id}/turn`, body),
+  turn: (id: string, body: { text?: string; option?: number }) => call<TransferReq>(`/requests/${id}/turn`, body),
+  checkFirst: (id: string) => call<TransferReq>(`/requests/${id}/check-first`, {}),
+  callGuardian: (id: string) => call<TransferReq>(`/requests/${id}/call`, {}),
   submit: (id: string) => call<Req>(`/requests/${id}/submit`, {}),
   cancel: (id: string) => call<Req>(`/requests/${id}/cancel`, {}),
   brief: (id: string) => call<Brief>(`/requests/${id}/brief`),

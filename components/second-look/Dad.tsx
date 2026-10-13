@@ -1,6 +1,6 @@
 "use client";
 
-import { QUESTIONS, type Assessment } from "@/lib/second-look/risk";
+import { PURPOSE_OPTIONS, QUESTIONS, type Assessment } from "@/lib/second-look/risk";
 import { useEffect, useRef, useState } from "react";
 import { ago, api, hoursLeft, isOpen, liveOf, money, short, type AssessResult, type Req, type TransferReq } from "./api";
 import { executeApproved, ownerAddress, sendWithinAllowance, signAndPropose } from "@/lib/second-look/owner-client";
@@ -23,6 +23,9 @@ interface Draft {
   token?: Sym;
   pasted?: boolean;
   mode: "contact" | "new";
+  /** Behaviour on the send screen, measured here on the device. */
+  amountEdits?: number;
+  dwellMs?: number;
 }
 
 const SCAM = "0x7a3f9e21b04d5c88a6f13e27d90b4f61a52ec91e";
@@ -189,7 +192,7 @@ function Setup() {
         <span className="li">This protects you if someone ever pressures you to turn protection off. Lowering the limit works right away.</span>
       </div>
       <label className="row" style={{ alignItems: "center", gap: 12, fontSize: 16 }}>
-        <input type="checkbox" checked={agree} onChange={(e) => setAgree(e.target.checked)} style={{ width: 22, height: 22, accentColor: "#5A3E2B" }} /> I understand how this works
+        <input type="checkbox" checked={agree} onChange={(e) => setAgree(e.target.checked)} style={{ width: 22, height: 22, accentColor: "#2B211A" }} /> I understand how this works
       </label>
       <ErrorText msg={err} />
       <button
@@ -245,8 +248,11 @@ function Home({ go }: { go: (s: Screen) => void }) {
       </div>
       {isOpen(open) && (
         <button className="box tint-yel" type="button" onClick={() => go(open.status === "chat" ? "chat" : "waiting")} style={{ border: "none", textAlign: "left", color: "inherit", font: "inherit" }}>
-          <strong>Waiting on {names.guardian}</strong>
-          <span className="li">{open.kind === "transfer" ? `${fmtAmount(open.amount, symOf(open))} to ${open.label}` : open.title} · tap to view</span>
+          <strong>{open.kind === "transfer" && open.status === "chat" ? (open.conversation.checkingFirst ? "You're checking first" : "Your chat with Lumi") : `Waiting on ${names.guardian}`}</strong>
+          <span className="li">
+            {open.kind === "transfer" ? `${fmtAmount(open.amount, symOf(open))} to ${open.label}` : open.title}
+            {open.kind === "transfer" && open.status === "chat" ? ` · saved for ${hoursLeft(open, state.now)}h, nothing moves` : ""} · tap to {open.status === "chat" ? "continue" : "view"}
+          </span>
         </button>
       )}
       {state.mode === "live" && state.latest?.status === "approved" && state.latest.safeTx && !state.latest.safeTx.executedTxHash && (
@@ -288,6 +294,9 @@ function Send({ draft, setDraft, go }: { draft: Draft; setDraft: (d: Draft) => v
   const set = (p: Partial<Draft>) => setDraft({ ...draft, ...p });
   const token = symOf(draft);
   const balance = balanceOf(state.account, token);
+  // Behaviour signals, measured on the device: time on this screen, and how often the amount was changed.
+  const opened = useRef(Date.now());
+  const lastAmount = useRef<string | null>(draft.amount || null);
   return (
     <div className="stack fade">
       <Head back="home" go={go} />
@@ -336,7 +345,18 @@ function Send({ draft, setDraft, go }: { draft: Draft; setDraft: (d: Draft) => v
       </label>
       <label className="field">
         Amount ({token})
-        <input type="text" inputMode="decimal" placeholder="0" value={draft.amount} onChange={(e) => set({ amount: e.target.value })} />
+        <input
+          type="text"
+          inputMode="decimal"
+          placeholder="0"
+          value={draft.amount}
+          onChange={(e) => set({ amount: e.target.value })}
+          onBlur={() => {
+            const v = draft.amount.trim();
+            if (v && lastAmount.current !== null && v !== lastAmount.current) set({ amountEdits: (draft.amountEdits ?? 0) + 1 });
+            if (v) lastAmount.current = v;
+          }}
+        />
       </label>
       <ErrorText msg={err} />
       <button
@@ -349,6 +369,7 @@ function Send({ draft, setDraft, go }: { draft: Draft; setDraft: (d: Draft) => v
           if (!(amt > 0)) return setErr("Enter an amount above 0.");
           if (!fitsDecimals(amt, token)) return setErr(`${token} allows at most ${tokenOf(token).decimals} decimals.`);
           if (amt > balance) return setErr(`That's more than your balance of ${fmtAmount(balance, token)}.`);
+          setDraft({ ...draft, dwellMs: (draft.dwellMs ?? 0) + (Date.now() - opened.current) });
           go("review");
         }}
       >
@@ -362,10 +383,20 @@ function Send({ draft, setDraft, go }: { draft: Draft; setDraft: (d: Draft) => v
           <button className="btn sm" type="button" onClick={() => setDraft({ mode: "contact", to: state.account.allowlist[0]!.addr, label: state.account.allowlist[0]!.label, amount: "40" })}>
             Grocery, 40
           </button>
+          <button
+            className="btn sm"
+            type="button"
+            onClick={() => {
+              const m = state.account.allowlist.find((c) => c.label === state.names.guardian) ?? state.account.allowlist.at(-1)!;
+              setDraft({ mode: "contact", to: m.addr, label: m.label, amount: "800" });
+            }}
+          >
+            Trusted, 800
+          </button>
           <button className="btn sm" type="button" onClick={() => setDraft({ mode: "new", to: "0x2f8e61c0d94b37a5e18c2f60b9d4a73e05c1f8d2", label: "Piano teacher", amount: "80", pasted: true })}>
             New contact, 80
           </button>
-          <button className="btn sm" type="button" onClick={() => setDraft({ mode: "new", to: SCAM, label: '"Trading platform"', amount: "5000", pasted: true })}>
+          <button className="btn sm" type="button" onClick={() => setDraft({ mode: "new", to: SCAM, label: '"Trading platform"', amount: "5000", pasted: true, amountEdits: 3 })}>
             "Platform", 5,000
           </button>
         </div>
@@ -390,25 +421,27 @@ function Review({ draft, go, onSent }: { draft: Draft; go: (s: Screen) => void; 
   useEffect(() => {
     (async () => {
       const owner = live ? await ownerAddress({ safe, owner: setupOwner }) : undefined;
-      setRes(await api.assess({ to: draft.to, amount, token, pasted: draft.pasted, owner }));
+      setRes(await api.assess({ to: draft.to, amount, token, pasted: draft.pasted, owner, amountEdits: draft.amountEdits, dwellMs: draft.dwellMs }));
     })().catch((e: Error) => setErr(e.message));
-  }, [draft.to, amount, token, draft.pasted, live, safe, setupOwner]);
+  }, [draft.to, amount, token, draft.pasted, draft.amountEdits, draft.dwellMs, live, safe, setupOwner]);
 
   if (!a) return <div className="stack">{err ? <ErrorText msg={err} /> : <span className="meta">Checking…</span>}</div>;
   const tone = a.tier === "red" ? "red" : a.tier === "yellow" ? "yellow" : "green";
   const noAllowance = res!.route === "guardian" && a.tier !== "red";
   const lead = noAllowance
     ? `This looks normal, but the daily limit isn't turned on for this account yet, so ${g} confirms it on her Ledger.`
-    : a.tier === "red"
-      ? `This one needs a second look from ${g} before it goes out.`
-      : a.tier === "yellow"
-        ? `Within your limit, so it goes out now. Because it's a new address, ${g} gets a heads-up. No approval needed.`
-        : "Everyday payment, within your daily limit.";
+    : a.lightPath
+      ? `This is above your daily limit, so ${g} confirms. ${draft.label || "This contact"} is a trusted contact, so no questions needed.`
+      : a.tier === "red"
+        ? `This one needs a second look from ${g} before it goes out.`
+        : a.tier === "yellow"
+          ? `Within your limit, so it goes out now. Because it's a new address, ${g} gets a heads-up. No approval needed.`
+          : "Everyday payment, within your daily limit.";
 
   async function sign() {
     setBusy(true);
     try {
-      const base = { to: draft.to, amount, token, label: draft.label, pasted: draft.pasted };
+      const base = { to: draft.to, amount, token, label: draft.label, pasted: draft.pasted, amountEdits: draft.amountEdits, dwellMs: draft.dwellMs };
       if (live && res!.route === "allowance") {
         // Everyday transfer: Dad's MetaMask sends it through the on-chain daily allowance. No Mia.
         const txHash = await sendWithinAllowance(liveOf(state), draft.to, amount);
@@ -480,30 +513,30 @@ function Chat({ req, go }: { req: TransferReq; go: (s: Screen) => void }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const end = useRef<HTMLDivElement>(null);
-  const current = QUESTIONS.find((q) => c.flags[q.id] === "unclear" && (c.attempts[q.id] ?? 0) < 2);
+  const options = c.done || !c.asking ? [] : c.asking === "purpose" ? PURPOSE_OPTIONS.map((o) => o.label) : QUESTIONS[c.asking].options.map((o) => o.label);
 
   useEffect(() => {
     end.current?.scrollIntoView({ block: "nearest" });
   }, [c.lines.length, busy]);
 
-  async function send(body: { text?: string; quick?: 0 | 1 }) {
+  async function act(fn: () => Promise<unknown>, after?: Screen) {
     setBusy(true);
     setErr(null);
     try {
-      await api.turn(req.id, body);
-      setText("");
+      await fn();
       await refresh();
+      if (after) go(after);
     } catch (e) {
       setErr((e as Error).message);
     } finally {
       setBusy(false);
     }
   }
-  const cancel = async () => {
-    await api.cancel(req.id);
-    await refresh();
-    go("result");
-  };
+  const send = (body: { text?: string; option?: number }) => act(async () => {
+    await api.turn(req.id, body);
+    setText("");
+  });
+  const cancel = () => act(() => api.cancel(req.id), "result");
 
   return (
     <div className="chat">
@@ -519,11 +552,11 @@ function Chat({ req, go }: { req: TransferReq; go: (s: Screen) => void }) {
         ))}
         {busy && <span className="typing">Lumi is thinking…</span>}
         <div ref={end} />
-        {!c.done && current ? (
+        {!c.done ? (
           <>
-            <div className="row">
-              {current.quick.map((label, i) => (
-                <button key={label} className="chip" type="button" disabled={busy} onClick={() => send({ quick: i as 0 | 1 })}>
+            <div className="answers">
+              {options.map((label, i) => (
+                <button key={label} className="chip" type="button" disabled={busy} onClick={() => send({ option: i })}>
                   {label}
                 </button>
               ))}
@@ -550,31 +583,36 @@ function Chat({ req, go }: { req: TransferReq; go: (s: Screen) => void }) {
           </>
         ) : (
           <>
-            <button className="btn primary" type="button" onClick={cancel}>
-              I've changed my mind, cancel
-            </button>
-            <button
-              className="btn"
-              type="button"
-              disabled={busy}
-              onClick={async () => {
-                setBusy(true);
-                setErr(null);
-                try {
+            {c.selfCheck && (
+              <div className="box tint-yel">
+                <strong style={{ fontSize: 15 }}>Check it yourself</strong>
+                <span className="li">{c.selfCheck}</span>
+              </div>
+            )}
+            <div className="exits">
+              <button className="btn primary" type="button" disabled={busy || !!c.callRequested} onClick={() => act(() => api.callGuardian(req.id))}>
+                {c.callRequested ? `${g} knows you'd like to talk` : `Call ${g} now`}
+              </button>
+              {!c.checkingFirst && (
+                <button className="btn" type="button" disabled={busy} onClick={() => act(() => api.checkFirst(req.id), "home")}>
+                  {"I'll check first and come back"}
+                </button>
+              )}
+              <button
+                className="btn"
+                type="button"
+                disabled={busy}
+                onClick={() =>
                   // Live: Dad signs the Safe transaction in MetaMask; demo: hand it straight to Mia.
-                  if (state.mode === "live") await signAndPropose(liveOf(state), req);
-                  else await api.submit(req.id);
-                  await refresh();
-                  go("waiting");
-                } catch (e) {
-                  setErr((e as Error).message);
-                } finally {
-                  setBusy(false);
+                  act(() => (state.mode === "live" ? signAndPropose(liveOf(state), req) : api.submit(req.id)), "waiting")
                 }
-              }}
-            >
-              Send to {g} for approval
-            </button>
+              >
+                Send to {g} to confirm
+              </button>
+              <button className="link" type="button" disabled={busy} onClick={cancel}>
+                Cancel
+              </button>
+            </div>
             <ErrorText msg={err} />
           </>
         )}
@@ -709,7 +747,9 @@ function Result({ go, sent }: { go: (s: Screen) => void; sent: Sent | null }) {
       : r.status === "cancelled"
         ? { t: "You stopped it yourself", p: `Nothing was sent. If you'd like to talk it through, ${g} is one call away.` }
         : r.status === "expired"
-          ? { t: "This request expired", p: `${g} didn't respond in time, so it was cancelled. Your funds never left your account. You can start it again anytime.` }
+          ? r.expiredWhile === "chat"
+            ? { t: "This request expired", p: `You didn't send it on to ${g}, so after 24 hours it was cancelled. Your funds never left your account. You can start it again anytime.` }
+            : { t: "This request expired", p: `${g} didn't respond in time, so it was cancelled. Your funds never left your account. You can start it again anytime.` }
           : { t: "Sent", p: what };
   return (
     <div className="stack center fade" style={{ paddingTop: 20 }}>

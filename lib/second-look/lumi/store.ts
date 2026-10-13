@@ -137,6 +137,8 @@ export class Store {
   }
 
   restore(s: { state: AccountState; clockOffset: number }) {
+    // Requests saved by the older five-question chat can't be continued; drop them rather than crash.
+    s.state.requests = s.state.requests.filter((r) => r.kind !== "transfer" || (r.conversation && "facts" in r.conversation));
     this.state = s.state;
     this.clockOffset = s.clockOffset;
   }
@@ -189,9 +191,14 @@ export class Store {
         this.state.notifications.unshift({ ts: now, text: `Reminder ${i + 1} of 3 sent to ${this.names.guardian}: ${describe(r)}` });
       r.remindersSent = Math.max(r.remindersSent ?? 0, due);
       if (t.expired) {
+        const wasChat = r.status === "chat";
+        r.expiredWhile = wasChat ? "chat" : "pending";
         r.status = "expired";
         r.decidedAt = now;
-        this.state.log.unshift({ ts: now, text: `${describe(r)}: expired with no response, nothing moved` });
+        this.state.log.unshift({
+          ts: now,
+          text: wasChat ? `${describe(r)}: ${this.names.owner} didn't send it on, so it expired. Nothing moved` : `${describe(r)}: expired with no response, nothing moved`,
+        });
       }
     }
   }
@@ -213,7 +220,7 @@ export class Store {
     // Low risk but the Safe has no daily allowance set up yet: it still needs Mia, without a chat.
     if (assessment.tier !== "red" && draft.route === "guardian") {
       if (this.openRequest()) throw new HttpError(409, `One request is already waiting on ${this.names.guardian}`);
-      const conversation = { ...this.lumi.open({ assessment }), lines: [], done: true };
+      const conversation = { ...this.lumi.open({ assessment }), lines: [], done: true, asking: null };
       const request: TransferRequest = { id: `r${this.now().toString(36)}`, kind: "transfer", createdAt: this.now(), status: "pending", to: draft.to, label, amount: draft.amount, token, assessment, conversation };
       this.state.requests.unshift(request);
       this.tick();
@@ -233,7 +240,8 @@ export class Store {
       id: `r${this.now().toString(36)}`,
       kind: "transfer",
       createdAt: this.now(),
-      status: "chat",
+      // Light path (trusted contact, only above the limit): straight to the guardian, no questions.
+      status: assessment.lightPath ? "pending" : "chat",
       to: draft.to,
       label,
       amount: draft.amount,
@@ -246,10 +254,39 @@ export class Store {
     return { assessment, request };
   }
 
-  async answer(id: string, input: { text?: string; quick?: 0 | 1 }) {
+  async answer(id: string, input: { text?: string; option?: number }) {
     const r = this.getTransfer(id);
     if (r.status !== "chat") throw new HttpError(409, "This conversation is closed");
     r.conversation = await this.lumi.turn(r, input);
+    return r;
+  }
+
+  /** "I'll check first and come back": the request stays saved for its 24 hours. Nothing moves, no penalty. */
+  checkFirst(id: string) {
+    const r = this.getTransfer(id);
+    if (r.status !== "chat" || !r.conversation.done) throw new HttpError(409, "This conversation is closed");
+    const left = Math.max(1, Math.ceil(timeline(r.createdAt, this.now()).expiresInMs / HOUR));
+    r.conversation = {
+      ...r.conversation,
+      checkingFirst: this.now(),
+      lines: [...r.conversation.lines, { from: "lumi", ts: this.now(), text: `Take your time. Your transfer is saved for ${left} more hours and nothing moves. Come back here when you've checked.` }],
+    };
+    this.state.fyi.unshift({ ts: this.now(), text: `${this.names.owner} chose to check first before sending ${fmtAmount(r.amount, symOf(r))} to ${r.label}` });
+    return r;
+  }
+
+  /** "Call Mia now": tell the guardian he'd like to talk. The transfer stays on hold. */
+  callGuardian(id: string) {
+    const r = this.getTransfer(id);
+    if (!isOpen(r.status)) throw new HttpError(409, "This request is closed");
+    if (!r.conversation.callRequested) {
+      r.conversation = {
+        ...r.conversation,
+        callRequested: this.now(),
+        lines: [...r.conversation.lines, { from: "lumi", ts: this.now(), text: `I've let ${this.names.guardian} know you'd like to talk. Your transfer stays on hold.` }],
+      };
+      this.state.fyi.unshift({ ts: this.now(), text: `${this.names.owner} would like you to call him about ${fmtAmount(r.amount, symOf(r))} to ${r.label}` });
+    }
     return r;
   }
 
@@ -284,6 +321,8 @@ export class Store {
     const r = this.get(id);
     if (!isOpen(r.status)) throw new HttpError(409, "This request is closed");
     const ok = d.decision === "approve";
+    // Approving waits until Dad has finished with Lumi and sent it on. Declining works anytime.
+    if (ok && r.status === "chat") throw new HttpError(409, `${this.names.owner} hasn't sent this to you yet`);
     // When a real Safe transaction is attached, approval only counts with the guardian's device signature.
     if (ok && r.safeTx && !d.signature) throw new HttpError(400, "Approving needs the signature from your Ledger");
     r.status = ok ? "approved" : "rejected";

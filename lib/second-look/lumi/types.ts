@@ -1,4 +1,4 @@
-import type { Assessment, FlagId, Flags, Pattern, RequestStatus, RiskScore, RuleChange } from "../risk";
+import type { Assessment, Attempts, Facts, Pattern, PatternStep, Purpose, QuestionId, RequestStatus, RiskScore, RuleChange } from "../risk";
 
 export interface ChatLine {
   from: "lumi" | "owner";
@@ -8,12 +8,24 @@ export interface ChatLine {
 
 export interface Conversation {
   lines: ChatLine[];
-  flags: Flags;
+  /** What the payment is for. Set once; it picks the questions and can't be changed later. */
+  purpose: Purpose | null;
+  facts: Facts;
   pattern: Pattern;
+  /** The question Lumi is waiting on, or null when the questions are done. */
+  asking: QuestionId | "purpose" | null;
   done: boolean;
   ownerWantsToStop: boolean;
   /** How many times each question was asked without a clear answer. After two, Lumi moves on. */
-  attempts: Partial<Record<FlagId, number>>;
+  attempts: Attempts;
+  /** Light path: a trusted contact, only above the limit. No questions were asked. */
+  light?: boolean;
+  /** The one thing Lumi suggested he check himself. */
+  selfCheck?: string;
+  /** When he chose "I'll check first and come back". The request stays saved; nothing moves. */
+  checkingFirst?: number;
+  /** When he asked the guardian to call him. */
+  callRequested?: number;
   /** Which path produced the latest turn: Claude, or the scripted fallback. */
   source: "ai" | "script";
   /** The guardian's risk score after each turn, starting with the transfer alone. */
@@ -27,8 +39,16 @@ export interface GuardianBrief {
   risk: "high" | "elevated";
   headline: string;
   whyFlagged: string[];
-  /** Deterministic lines from the settled flags. */
+  /** Deterministic lines from the settled facts. */
   told: string[];
+  /** What he said the payment is for. */
+  purpose: string | null;
+  /** The known scam this matches, and which of its steps were seen. */
+  matches: { name: string; steps: PatternStep[] } | null;
+  selfCheck?: string;
+  light: boolean;
+  checkingFirst?: number;
+  callRequested?: number;
   /** Model's faithful paraphrase of what the owner said. */
   inTheirWords: string[];
   ourRead: string;
@@ -57,6 +77,8 @@ interface BaseRequest {
   note?: string;
   decidedAt?: number;
   remindersSent?: number;
+  /** Whether it expired while Dad was still talking with Lumi, or while waiting on the guardian. */
+  expiredWhile?: "chat" | "pending";
   safeTx?: PendingSafeTx;
   /** A message Mia signed on her Ledger (reject, or approving an off-chain rule). */
   ledger?: LedgerMessage;
